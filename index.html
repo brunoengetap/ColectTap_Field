@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v1.0 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v1.1 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -241,7 +241,7 @@ input[type=file]{display:none}
     <div class="pin-logo">
       <div class="pl-badge">COLECT</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · NR-13 · v1.0</div>
+      <div class="pl-sub">Engetap · NR-13 · v1.1</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
@@ -445,7 +445,7 @@ input[type=file]{display:none}
 // CONFIG
 // ═══════════════════════════════════════════════════════════════
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzvPXKe9uYtOPJVqqEsPadYeB2JoFxITmxTTo4Pj4DuCgL1lxxe6b-wLcLAPlx8PSfX/exec';
-const APP_VERSION = 'ColectTap-v1.0';
+const APP_VERSION = 'ColectTap-v1.1';
 
 // ═══════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -1021,21 +1021,79 @@ function renderServico(t) {
 }
 
 // ── SEÇÃO G: OBSERVAÇÕES E FOTO ──
+// Retorna as definições de fotos para cada tipo de equipamento
+function getFotosDefs(t) {
+  // Fotos comuns a todos os tipos
+  const comuns = [
+    { key:'foto_local',   defaultLabel:'Foto do Local / Equipamento' },
+    { key:'foto_placa',   defaultLabel:'Foto da Placa de Identificação' },
+    { key:'foto_psv',     defaultLabel:'Foto da Válvula de Segurança ou Válvula de Alívio' },
+    { key:'foto_manometro', defaultLabel:'Foto do Manômetro ou Instrumento de Pressão' },
+    { key:'foto_docs',    defaultLabel:'Fotos dos Documentos Existentes' },
+    { key:'foto_ambiente',defaultLabel:'Foto Geral do Ambiente de Instalação' },
+  ];
+  // Fotos específicas por tipo
+  const extras = {
+    caldeira: [
+      { key:'foto_abastec_emerg', defaultLabel:'Foto do Sistema de Abastecimento de Emergência' },
+      { key:'foto_indicador_nivel', defaultLabel:'Foto do Indicador de Nível' },
+      { key:'foto_seg_adicionais', defaultLabel:'Foto de Sistemas de Segurança Adicionais' },
+      { key:'foto_descarga_fundo', defaultLabel:'Foto da Descarga de Fundo' },
+      { key:'foto_ambiente_cal',   defaultLabel:'Foto do Ambiente onde está Instalada' },
+      { key:'foto_combate_inc',    defaultLabel:'Foto dos Sistemas de Combate a Incêndio Instalados' },
+    ],
+    tanque: [
+      { key:'foto_quebra_vacuo',   defaultLabel:'Foto da Válvula Quebra-Vácuo' },
+    ],
+    tubulacao: [
+      { key:'foto_geral_tub',      defaultLabel:'Foto Geral da Tubulação' },
+      { key:'foto_ponto_alto',     defaultLabel:'Foto do Ponto Mais Alto da Tubulação' },
+    ],
+  };
+  return [...comuns, ...(extras[t] || [])];
+}
+
+function renderFotoBlock(def) {
+  const key = def.key;
+  const labelKey = key + '_label';
+  const currentLabel = SES.fotos[labelKey] || def.defaultLabel;
+  const foto = SES.fotos[key];
+  return `
+    <div style="margin-bottom:16px;background:var(--surf);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+      <div style="padding:10px 14px 6px">
+        <label style="display:block;font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">Legenda da Foto</label>
+        <input type="text" id="lbl_${key}" value="${currentLabel.replace(/"/g,'&quot;')}"
+          style="width:100%;background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--text);font-family:var(--body)"
+          oninput="SES.fotos['${labelKey}']=this.value"
+          onfocus="this.style.borderColor='var(--accent)'"
+          onblur="this.style.borderColor='var(--border)'">
+      </div>
+      <div style="padding:0 14px 12px">
+        ${foto && foto.dataUrl
+          ? `<img src="${foto.dataUrl}" class="photo-thumb" style="margin-bottom:6px"><span class="photo-clear" onclick="clearFoto('${key}')">✕ Remover foto</span>`
+          : `<label class="photo-btn" for="fileInput" onclick="preparePhoto('${key}')" style="margin-bottom:0">📷 Tirar / Selecionar Foto</label>`
+        }
+      </div>
+    </div>`;
+}
+
 function renderObs(t) {
-  const hasPhoto = SES.fotos['foto_local'] && SES.fotos['foto_local'].dataUrl;
+  // Pergunta extra para tubulação
+  const tubExtra = t === 'tubulacao' ? `
+    <p class="sec-label" style="margin-top:4px">Documentação de Tubulação</p>
+    ${toggle('possui_desenho_tub','Existe desenho / isométrico da tubulação?',['Sim','Não','Parcial'])}
+    ${campo('obs_desenho_tub','Observações sobre o desenho','textarea',{placeholder:'Localização do desenho, revisão atual, pendências…'})}` : '';
+
+  const defs = getFotosDefs(t);
+  const fotosHtml = defs.map(d => renderFotoBlock(d)).join('');
+
   return `
     ${campo('obs_gerais','Observações Gerais','textarea',{placeholder:'Condição geral, anomalias, recomendações…'})}
     ${campo('obs_inspetor','Recomendações do Inspetor','textarea',{placeholder:'Ações imediatas, próxima inspeção…'})}
-    <p class="sec-label">Foto do Local / Equipamento</p>
-    ${hasPhoto
-      ? `<img src="${SES.fotos['foto_local'].dataUrl}" class="photo-thumb"><span class="photo-clear" onclick="clearFoto('foto_local')">✕ Remover foto</span>`
-      : `<label class="photo-btn" for="fileInput" onclick="preparePhoto('foto_local')">📷 Tirar / Selecionar Foto</label>`
-    }
-    <p class="sec-label">Foto da Placa de Identificação</p>
-    ${SES.fotos['foto_placa'] && SES.fotos['foto_placa'].dataUrl
-      ? `<img src="${SES.fotos['foto_placa'].dataUrl}" class="photo-thumb"><span class="photo-clear" onclick="clearFoto('foto_placa')">✕ Remover foto</span>`
-      : `<label class="photo-btn" for="fileInput" onclick="preparePhoto('foto_placa')">📷 Foto da Placa de Identificação</label>`
-    }`;
+    ${tubExtra}
+    <p class="sec-label" style="margin-top:8px">Registro Fotográfico</p>
+    <div class="info-box" style="margin-bottom:12px">As legendas são editáveis. Toque no campo de texto acima de cada foto para personalizar.</div>
+    ${fotosHtml}`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1089,9 +1147,14 @@ function salvarCampos(secId) {
     const key = el.id.replace('f_','');
     SES.dados[key] = el.value;
   });
+  // Salvar legendas de fotos (inputs com id lbl_*)
+  document.querySelectorAll('#t5-body [id^="lbl_"]').forEach(el => {
+    const key = el.id.replace('lbl_','') + '_label';
+    SES.fotos[key] = el.value;
+  });
   // Toggles já salvos em setToggle
   // Checks já salvos em toggleCheck
-  SES.dados.possui_foto = Object.keys(SES.fotos).length > 0;
+  SES.dados.possui_foto = Object.keys(SES.fotos).filter(k=>!k.endsWith('_label')).length > 0;
 }
 
 function restaurarCampos(secId) {
@@ -1286,7 +1349,7 @@ async function gerarPDFEquips(indices, completo) {
       doc.setFont('helvetica','normal');
       doc.setFontSize(8);
       doc.setTextColor(180,205,235);
-      doc.text(limparTxtPDF('ColectTap v1.0  |  ' + dataHoje), PW-MR, 16, {align:'right'});
+      doc.text(limparTxtPDF('ColectTap v1.1  |  ' + dataHoje), PW-MR, 16, {align:'right'});
     } else {
       doc.text('ENGETAP · LEVANTAMENTO NR-13', ML, 11);
       doc.text('Pag. '+pageNum, PW-MR, 11, {align:'right'});
@@ -1565,19 +1628,20 @@ async function gerarPDFEquips(indices, completo) {
     }
 
     // FOTOS
-    const fotos = Object.values(eq._fotos || {}).filter(f=>f&&f.dataUrl);
-    if (fotos.length) {
+    const fotoEntries = Object.entries(eq._fotos || {}).filter(([k,f])=>f&&f.dataUrl&&!k.endsWith('_label'));
+    if (fotoEntries.length) {
       y = newPage();
       y = secTit(y,'📷','Registro Fotografico');
       y+=3;
       const COLS=2, GAP=4;
       const PW2=(CW-GAP*(COLS-1))/COLS;
-      const MAX_H=70;
+      const MAX_H=65;
+      const CAP_H=8; // altura reservada para legenda
       let col=0, rowY=y, rowMaxH=0;
-      for (const ph of fotos) {
+      for (const [key, ph] of fotoEntries) {
         const ratio=(ph.h||600)/(ph.w||800);
         const imgH=Math.min(MAX_H,PW2*ratio);
-        const blockH=imgH+12;
+        const blockH=imgH+CAP_H+4;
         if (!rowMaxH) rowMaxH=blockH;
         y=ck(rowY,blockH);
         if (y!==rowY&&col!==0){col=0;rowY=y;rowMaxH=blockH;}
@@ -1593,6 +1657,13 @@ async function gerarPDFEquips(indices, completo) {
           doc.setFont('helvetica','italic');doc.setFontSize(7);doc.setTextColor(150,150,150);
           doc.text('Erro ao carregar imagem',x+2,y+imgH/2);
         }
+        // Legenda abaixo da foto
+        const legKey = key + '_label';
+        const legenda = eq._fotos[legKey] || key.replace('foto_','').replace(/_/g,' ');
+        doc.setFont('helvetica','italic');doc.setFontSize(6.5);doc.setTextColor(80,100,130);
+        const legTxt = limparTxtPDF(legenda);
+        const legLines = doc.splitTextToSize(legTxt, PW2-4);
+        doc.text(legLines[0], x+PW2/2, y+imgH+5, {align:'center'});
         col++;
         if(col>=COLS){col=0;rowY+=rowMaxH+GAP;rowMaxH=0;y=rowY;}
       }
