@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v1.5 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v1.6 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -242,7 +242,7 @@ input[type=file]{display:none}
     <div class="pin-logo">
       <div class="pl-badge">COLECT</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · NR-13 · v1.5</div>
+      <div class="pl-sub">Engetap · NR-13 · v1.6</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
@@ -461,8 +461,12 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyHl67vuH9ViqEE1ODUGywPm65r5lRQB3peMdKyZJJIUUuRjHKXDC-zz5prkqLB-zf6/exec';
-const APP_VERSION = 'ColectTap-v1.5';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzuD-MtcjEtn_7gabXip7hAzNc2hyzqwR-LJD4YDfRFtoV4kMk0nn24tYgq2LAVWnqR/exec';
+const APP_VERSION = 'ColectTap-v1.6';
+
+function isValidGasUrl(url) {
+  return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(String(url || '').trim());
+}
 const AUTOSAVE_INTERVAL_MS = 25000;
 const FOTO_MAX_SIZE = 800;
 const FOTO_JPEG_QUALITY = 0.82;
@@ -591,6 +595,7 @@ function getDemoOS() {
 const DEMO_MODE = !GAS_URL || GAS_URL.includes('COLE_AQUI');
 
 async function gasGet(action, params={}) {
+  if (!isValidGasUrl(GAS_URL)) throw new Error('URL GAS inválida');
   const url = new URL(GAS_URL);
   url.searchParams.set('action', action);
   url.searchParams.set('_ts', Date.now());
@@ -608,6 +613,7 @@ async function gasGet(action, params={}) {
 }
 
 async function gasPost(action, data={}) {
+  if (!isValidGasUrl(GAS_URL)) throw new Error('URL GAS inválida');
   const url = new URL(GAS_URL);
   url.searchParams.set('action', action);
   const r = await Promise.race([
@@ -714,7 +720,7 @@ async function keyOk() {
   }
   try {
     const r = await gasGet('validarPIN', {pin, app:'field'});
-    if (r.valido || r.status === 'ok') {
+    if (r && r.status === 'ok' && r.valido === true && (r.id_inspetor || (r.usuario && r.usuario.id))) {
       SES.inspetor = {id_inspetor: r.id_inspetor || (r.usuario && r.usuario.id) || '', nome: r.nome || (r.usuario && r.usuario.nome) || ''};
       _loginInProgress = false;
       afterLogin();
@@ -749,8 +755,12 @@ async function afterLogin() {
     if (r.status === 'ok') SES._osList = r.os || [];
     setGASStatus('ok','GAS conectado ✓');
   } catch(e) {
-    SES._osList = getDemoOS();
-    setGASStatus('err','Falha GAS — demo');
+    SES._osList = [];
+    setGASStatus('err','Falha ao carregar OS');
+    document.getElementById('t2-body').innerHTML =
+      '<div class="empty-state"><div class="ei">⚠️</div><p>Falha ao carregar OS da GAS.<br>Verifique conexão, implantação ou permissões do Web App.</p></div>';
+    goTo('t2');
+    return;
   }
   renderT2();
 }
