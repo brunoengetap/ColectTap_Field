@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v1.6 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v1.7 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -461,8 +461,18 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbzuD-MtcjEtn_7gabXip7hAzNc2hyzqwR-LJD4YDfRFtoV4kMk0nn24tYgq2LAVWnqR/exec';
-const APP_VERSION = 'ColectTap-v1.6';
+// URL de produção do ColectTap GAS — manter igual no Field e Manager
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
+const APP_VERSION = 'ColectTap-v1.7';
+
+function esc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
 
 function isValidGasUrl(url) {
   return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(String(url || '').trim());
@@ -487,13 +497,16 @@ function ensureVisitId() {
   return SES.id_visita_colect;
 }
 
-function ensureEquipId() {
-  if (SES.id_equipamento_colect) return SES.id_equipamento_colect;
+function newEquipId() {
   const osn = (SES.os && SES.os.numero_os ? SES.os.numero_os : 'SEMOS').replace(/\s+/g, '');
-  const d = new Date();
-  const stamp = d.getFullYear().toString() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0') + '-' + String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0') + String(d.getSeconds()).padStart(2,'0');
-  SES.id_equipamento_colect = `EQ-${osn}-${stamp}-${gerarId4()}`;
-  return SES.id_equipamento_colect;
+  return `EQ-${osn}-${Date.now()}-${gerarId4()}`;
+}
+
+function ensureEquipId() {
+  if (!SES.currentEquipId) SES.currentEquipId = newEquipId();
+  // Keep legacy field in sync for compat
+  SES.id_equipamento_colect = SES.currentEquipId;
+  return SES.currentEquipId;
 }
 
 function markDirty() { _dirty = true; }
@@ -526,7 +539,7 @@ function persistCurrentEquipDraft(reason='manual') {
   };
   localStorage.setItem(chave, JSON.stringify(payload));
 }
-function autosaveDraft(reason='auto') { if (_dirty !== true) return; persistCurrentEquipDraft(reason); if (SES.os?.id_os) localStorage.setItem('colect_os_'+SES.os.id_os, JSON.stringify(SES.equipamentos||[])); _dirty = false; }
+function autosaveDraft(reason='auto') { if (_dirty !== true) return; persistCurrentEquipDraft(reason); _dirty = false; }
 function loadDraftsForOS(id_os) {
   if (!id_os) return null;
   let data = null;
@@ -556,13 +569,15 @@ const SES = {
   os: null,
   _osList: [],
   equipamentos: [],       // equipamentos coletados nesta OS (local)
-  equipEdit: null,        // equipamento em edição {idx, dados}
+  equipEdit: null,        // índice do equipamento em edição
   tipoEquip: null,        // 'vaso'|'caldeira'|'tubulacao'|'tanque'
   secAtual: 0,            // seção atual do formulário
   dados: {},              // campos do formulário em andamento
   fotos: {},              // { campo: { dataUrl, w, h } }
   history: [],
   pendencias: [],
+  currentEquipId: null,   // id único do equipamento em edição
+  id_visita_colect: null,
 };
 
 // Seções por tipo de equipamento
@@ -637,16 +652,32 @@ function setGASStatus(state, label) {
 // NAVEGAÇÃO
 // ═══════════════════════════════════════════════════════════════
 let currentScreen = 't1';
+let _navLock = false;
+let _pendingScreen = null;
 
 function goTo(id) {
-  const prev = document.getElementById('scr-' + currentScreen);
   const next = document.getElementById('scr-' + id);
-  if (!next) return;
+  if (!next) { console.error('goTo: tela não encontrada:', id); return; }
+  if (id === currentScreen) return;
+  if (_navLock) { _pendingScreen = id; return; }
+  _navLock = true;
+  const prev = document.getElementById('scr-' + currentScreen);
   if (prev) prev.classList.add('out');
   setTimeout(() => {
-    if (prev) { prev.classList.add('hidden'); prev.classList.remove('out'); }
+    document.querySelectorAll('.screen').forEach(s => {
+      s.classList.add('hidden');
+      s.classList.remove('out');
+    });
     next.classList.remove('hidden');
     currentScreen = id;
+    _navLock = false;
+    if (_pendingScreen && _pendingScreen !== currentScreen) {
+      const p = _pendingScreen;
+      _pendingScreen = null;
+      goTo(p);
+    } else {
+      _pendingScreen = null;
+    }
   }, 220);
 }
 
@@ -810,11 +841,22 @@ function formatDate(d) {
 function selectOS(id) {
   SES.os = SES._osList.find(o => o.id_os === id);
   if (!SES.os) return;
-  // Carrega equipamentos salvos localmente para esta OS
-  const chaveNova = 'colect_os_' + id;
-  const chaveLegada = 'colect_equip_' + id;
-  try { SES.equipamentos = JSON.parse(localStorage.getItem(chaveNova) || localStorage.getItem(chaveLegada) || '[]'); }
-  catch { SES.equipamentos = []; }
+  // Carrega equipamentos salvos localmente para esta OS usando formato estruturado
+  const draft = loadDraftsForOS(id);
+  if (draft && Array.isArray(draft.equipamentos) && draft.equipamentos.length) {
+    SES.equipamentos = draft.equipamentos.map(e => ({
+      ...(e.dados || {}),
+      _fotos: (e.fotos || {}),
+      _salvo: e.status_completude !== 'rascunho',
+      _nao_enquadrado: e.status_completude === 'nao_enquadrado',
+      status_completude: e.status_completude || 'rascunho',
+      id_equipamento_colect: e.id_equipamento_colect,
+      sync_status: e.sync_status || 'local'
+    }));
+  } else {
+    SES.equipamentos = [];
+  }
+  if (draft && draft.id_visita_colect) SES.id_visita_colect = draft.id_visita_colect;
   renderT3();
 }
 
@@ -835,12 +877,13 @@ function renderT3() {
       const tag = eq.tag || eq.numero_equip || ('EQ-' + (idx+1));
       const tipo = labelTipo(eq.tipo);
       const done = eq._salvo;
+      const naoEnq = eq._nao_enquadrado || eq.status_completude === 'nao_enquadrado';
       return `<div class="equip-card ${done?'done':''}" onclick="editarEquip(${idx})">
-        <div class="ec-tag">${tag}</div>
-        <div class="ec-tipo">${tipo}${eq.fabricante ? ' · ' + eq.fabricante : ''}</div>
+        <div class="ec-tag">${esc(tag)}</div>
+        <div class="ec-tipo">${esc(tipo)}${eq.fabricante ? ' · ' + esc(eq.fabricante) : ''}</div>
         <div class="ec-status">
-          ${done ? '<span class="pill pill-ok">✓ Completo</span>' : '<span class="pill pill-warn">⏳ Em andamento</span>'}
-          ${eq.categoria ? '<span class="pill pill-blue">Cat. ' + eq.categoria + '</span>' : ''}
+          ${naoEnq ? '<span class="pill pill-warn">⚠️ Não enquadrado NR13</span>' : done ? '<span class="pill pill-ok">✓ Completo</span>' : '<span class="pill pill-warn">⏳ Em andamento</span>'}
+          ${!naoEnq && eq.categoria ? '<span class="pill pill-blue">Cat. ' + esc(eq.categoria) + '</span>' : ''}
           ${eq.possui_foto ? '<span class="pill pill-gray">📷</span>' : ''}
         </div>
       </div>`;
@@ -855,17 +898,24 @@ function labelTipo(t) {
 
 function abrirNovoEquip() {
   SES.equipEdit = null;
-  SES.dados = {};
+  SES.currentEquipId = newEquipId();
+  SES.id_equipamento_colect = SES.currentEquipId;
+  SES.dados = { id_equipamento_colect: SES.currentEquipId };
   SES.fotos = {};
   SES.secAtual = 0;
+  SES.pendencias = [];
   goTo('t4');
 }
 
 function editarEquip(idx) {
+  const eq = SES.equipamentos[idx];
   SES.equipEdit = idx;
-  SES.dados = {...SES.equipamentos[idx]};
+  SES.currentEquipId = eq.id_equipamento_colect || newEquipId();
+  SES.id_equipamento_colect = SES.currentEquipId;
+  SES.dados = { ...eq, id_equipamento_colect: SES.currentEquipId };
   SES.tipoEquip = SES.dados.tipo;
   SES.fotos = SES.dados._fotos || {};
+  SES.pendencias = eq._pendencias || [];
   SES.secAtual = 0;
   renderT5();
 }
@@ -894,16 +944,35 @@ const SECS = [
   { id:'obs',           label:'H — Obs / Fotos / Revisão',   icon:'📷',  pct:100 },
 ];
 
+// ── HELPER: NÃO ENQUADRAMENTO ──
+function isNaoEnquadrado() {
+  return SES.dados.enquadra_nr13 === 'Não enquadra conforme 13.2.2';
+}
+
 function renderT5() {
   const sec = SECS[SES.secAtual];
   document.getElementById('t5-tipo-label').textContent = labelTipo(SES.tipoEquip);
   document.getElementById('t5-os-label').textContent = SES.os ? SES.os.numero_os : '—';
   document.getElementById('t5-badge').textContent = SES.equipEdit !== null ? 'Editando' : 'Novo';
-  document.getElementById('t5-progress').style.width = sec.pct + '%';
-  document.getElementById('t5-progress-lbl').textContent = sec.icon + ' ' + sec.label + ' (' + (SES.secAtual+1) + '/' + SECS.length + ')';
+
+  const naoEnq = SES.secAtual === 0 && isNaoEnquadrado();
+  if (naoEnq) {
+    document.getElementById('t5-progress').style.width = '100%';
+    document.getElementById('t5-progress-lbl').textContent = '⚠️ Registro de não enquadramento — etapa única';
+  } else {
+    document.getElementById('t5-progress').style.width = sec.pct + '%';
+    document.getElementById('t5-progress-lbl').textContent = sec.icon + ' ' + sec.label + ' (' + (SES.secAtual+1) + '/' + SECS.length + ')';
+  }
+
   document.getElementById('t5-btn-back').style.opacity = SES.secAtual === 0 ? '.3' : '1';
   document.getElementById('t5-btn-back').disabled = SES.secAtual === 0;
-  document.getElementById('t5-btn-next').textContent = SES.secAtual === SECS.length - 1 ? '✓ Revisar' : 'Próximo →';
+
+  if (naoEnq) {
+    document.getElementById('t5-btn-next').textContent = '✓ Revisar / Finalizar';
+  } else {
+    document.getElementById('t5-btn-next').textContent = SES.secAtual === SECS.length - 1 ? '✓ Revisar' : 'Próximo →';
+  }
+
   const body = document.getElementById('t5-body');
   body.innerHTML = renderSecao(sec.id);
   restaurarCampos(sec.id);
@@ -914,6 +983,15 @@ function renderT5() {
 function secNext() {
   markDirty();
   salvarCampos(SECS[SES.secAtual].id);
+
+  // Se não enquadrado na seção 0, encerrar aqui
+  if (SES.secAtual === 0 && isNaoEnquadrado()) {
+    SES.dados._nao_enquadrado = true;
+    SES.dados.status_completude = 'nao_enquadrado';
+    renderT6();
+    return;
+  }
+
   if (SES.secAtual < SECS.length - 1) {
     SES.secAtual++;
     renderT5();
@@ -1563,60 +1641,119 @@ function renderT6() {
   document.getElementById('t6-tipo').textContent = labelTipo(d.tipo);
 
   const rv = (label, val) => val
-    ? `<div class="rev-row"><span class="rev-label">${label}</span><span class="rev-value">${val}</span></div>`
+    ? `<div class="rev-row"><span class="rev-label">${esc(label)}</span><span class="rev-value">${esc(String(val))}</span></div>`
     : '';
-
-  const checkedDocs = Object.entries(d._checks || {}).filter(([,v])=>v).map(([k])=>k.replace(/doc_/,'').replace(/_/g,' ')).join(', ');
 
   let fotos_html = '';
   Object.keys(SES.fotos).forEach(f => {
+    if (f.endsWith('_label') || !SES.fotos[f] || !SES.fotos[f].dataUrl) return;
     fotos_html += `<img src="${SES.fotos[f].dataUrl}" style="width:48%;border-radius:8px;margin:2px">`;
   });
 
-  document.getElementById('t6-body').innerHTML = `
-    <div class="rev-card">
-      <div class="rev-head"><span class="rev-head-tag">${d.tag || '—'}</span><span class="rev-head-tipo">${labelTipo(d.tipo)}</span></div>
-      ${rv('Fabricante', d.fabricante)}
-      ${rv('Nº Equipamento', d.numero_equip)}
-      ${rv('Ano Fabricação', d.ano_fabricacao)}
-      ${rv('Categoria', d.categoria)}
-      ${rv('Código de Projeto', d.codigo_projeto)}
-      ${rv('Localização', d.localizacao)}
-      ${rv('Placa Indelével', d.placa_indelevel)}
-      ${rv('PMTA (kgf/cm²)', d.pmta)}
-      ${rv('Pressão Trabalho', d.pressao_trabalho)}
-      ${rv('Fluido', d.fluido || d.fluido_outro)}
-      ${rv('Classe Fluido', d.classe_fluido)}
-      ${rv('Pressão Teste Hidrostático', d.pressao_teste)}
-      ${d.volume ? rv('Volume', d.volume + (SES.tipoEquip==='tanque'?' m³':' litros')) : ''}
-      ${rv('Manômetro', d.possui_manometro)}
-      ${rv('Manômetro calibrado', d.manometro_calibrado)}
-      ${rv('PSV', d.possui_valvula)}
-      ${rv('PSV calibrada', d.valvula_calibrada)}
-      ${rv('Purgador', d.possui_purgador)}
-      ${rv('DCBI', d.possui_dcbi)}
-      ${rv('Documentos presentes', checkedDocs || '—')}
-      ${rv('Trabalho em altura', d.trabalho_altura)}
-      ${rv('Necessita TH', d.necessita_th)}
-      ${rv('Observações', d.obs_gerais)}
-    </div>
-    ${fotos_html ? '<p class="sec-label">Fotos</p><div style="display:flex;flex-wrap:wrap;gap:4px">' + fotos_html + '</div>' : ''}`;
+  if (isNaoEnquadrado()) {
+    // Revisão curta para não enquadrado
+    document.getElementById('t6-body').innerHTML = `
+      <div style="background:rgba(245,158,11,.1);border:1px solid var(--warn);border-radius:10px;padding:12px;margin-bottom:12px">
+        <strong style="color:var(--warn)">⚠️ Registro de Não Enquadramento NR13</strong>
+        <p style="font-size:12px;color:var(--text2);margin-top:4px">Este equipamento não foi submetido a inspeção NR13 completa. Apenas os dados de não enquadramento serão registrados.</p>
+      </div>
+      <div class="rev-card">
+        <div class="rev-head"><span class="rev-head-tag">${esc(d.tag || '—')}</span><span class="rev-head-tipo">${esc(labelTipo(d.tipo))}</span></div>
+        ${rv('Enquadramento NR13', d.enquadra_nr13)}
+        ${rv('Motivo de não enquadramento', d.motivo_nao_enquadramento)}
+        ${rv('Descrição / Detalhamento', d.descricao_nao_enquadramento)}
+        ${rv('Ação recomendada', d.acao_nao_enquadramento)}
+        ${rv('OS', SES.os ? SES.os.numero_os : '')}
+        ${rv('Cliente', SES.os ? SES.os.cliente : '')}
+        ${rv('Inspetor', SES.inspetor ? SES.inspetor.nome : '')}
+        ${rv('Observações', d.obs_gerais)}
+      </div>
+      ${fotos_html ? '<p class="sec-label">Fotos de Evidência</p><div style="display:flex;flex-wrap:wrap;gap:4px">' + fotos_html + '</div>' : ''}`;
+  } else {
+    // Revisão completa NR13
+    const checkedDocs = Object.entries(d._checks || {}).filter(([,v])=>v).map(([k])=>k.replace(/doc_/,'').replace(/_/g,' ')).join(', ');
+    document.getElementById('t6-body').innerHTML = `
+      <div class="rev-card">
+        <div class="rev-head"><span class="rev-head-tag">${esc(d.tag || '—')}</span><span class="rev-head-tipo">${esc(labelTipo(d.tipo))}</span></div>
+        ${rv('Fabricante', d.fabricante)}
+        ${rv('Nº Equipamento', d.numero_equip)}
+        ${rv('Ano Fabricação', d.ano_fabricacao)}
+        ${rv('Categoria', d.categoria)}
+        ${rv('Código de Projeto', d.codigo_projeto)}
+        ${rv('Localização', d.localizacao)}
+        ${rv('Placa Indelével', d.placa_indelevel)}
+        ${rv('PMTA (kgf/cm²)', d.pmta)}
+        ${rv('Pressão Trabalho', d.pressao_trabalho)}
+        ${rv('Fluido', d.fluido || d.fluido_outro)}
+        ${rv('Classe Fluido', d.classe_fluido)}
+        ${rv('Pressão Teste Hidrostático', d.pressao_teste)}
+        ${d.volume ? rv('Volume', d.volume + (SES.tipoEquip==='tanque'?' m³':' litros')) : ''}
+        ${rv('Manômetro', d.possui_manometro)}
+        ${rv('Manômetro calibrado', d.manometro_calibrado)}
+        ${rv('PSV', d.possui_valvula)}
+        ${rv('PSV calibrada', d.valvula_calibrada)}
+        ${rv('Purgador', d.possui_purgador)}
+        ${rv('DCBI', d.possui_dcbi)}
+        ${rv('Documentos presentes', checkedDocs || '—')}
+        ${rv('Trabalho em altura', d.trabalho_altura)}
+        ${rv('Necessita TH', d.necessita_th)}
+        ${rv('Observações', d.obs_gerais)}
+      </div>
+      ${fotos_html ? '<p class="sec-label">Fotos</p><div style="display:flex;flex-wrap:wrap;gap:4px">' + fotos_html + '</div>' : ''}`;
+  }
   goTo('t6');
 }
 
 // ═══════════════════════════════════════════════════════════════
 // SALVAR EQUIPAMENTO
 // ═══════════════════════════════════════════════════════════════
+function saveOSDraft() {
+  if (!SES.os || !SES.os.id_os) return;
+  const chave = 'colect_os_' + SES.os.id_os;
+  const now = new Date().toISOString();
+  ensureVisitId();
+  const payload = {
+    id_visita_colect: SES.id_visita_colect,
+    os: SES.os,
+    inspetor: SES.inspetor,
+    equipamentos: SES.equipamentos.map(eq => ({
+      id_equipamento_colect: eq.id_equipamento_colect || newEquipId(),
+      tipo: eq.tipo || '',
+      dados: { ...eq },
+      fotos: eq._fotos || {},
+      pendencias: eq._pendencias || [],
+      status_completude: eq.status_completude || (eq._nao_enquadrado ? 'nao_enquadrado' : eq._salvo ? 'salvo' : 'rascunho'),
+      sync_status: eq.sync_status || 'local',
+      created_at: eq.created_at || now,
+      updated_at: now,
+    })),
+    updated_at: now,
+    sync_status: 'local',
+    app_version: APP_VERSION
+  };
+  try { localStorage.setItem(chave, JSON.stringify(payload)); } catch(e) { console.error('saveOSDraft:', e); }
+}
+
 function salvarEquipamento() {
-  const equip = { ...SES.dados, _fotos: SES.fotos, _salvo: true, _ts: Date.now() };
+  const naoEnq = isNaoEnquadrado();
+  const equipId = ensureEquipId();
+  const equip = {
+    ...SES.dados,
+    id_equipamento_colect: equipId,
+    _fotos: SES.fotos,
+    _salvo: true,
+    _nao_enquadrado: naoEnq,
+    _pendencias: SES.pendencias || [],
+    status_completude: naoEnq ? 'nao_enquadrado' : 'salvo',
+    sync_status: 'local',
+    _ts: Date.now()
+  };
   if (SES.equipEdit !== null) {
     SES.equipamentos[SES.equipEdit] = equip;
   } else {
     SES.equipamentos.push(equip);
   }
-  // Persiste no localStorage
-  const chave = 'colect_equip_' + SES.os.id_os;
-  localStorage.setItem(chave, JSON.stringify(SES.equipamentos));
+  saveOSDraft();
   showToast('✓ Equipamento salvo localmente');
   renderT3();
 }
@@ -1625,33 +1762,37 @@ function salvarEquipamento() {
 // T-EXPORT
 // ═══════════════════════════════════════════════════════════════
 function renderExport() {
-  document.getElementById('exp-os-label').textContent = SES.os ? SES.os.numero_os + ' · ' + SES.os.cliente : '—';
+  document.getElementById('exp-os-label').textContent = SES.os ? esc(SES.os.numero_os + ' · ' + SES.os.cliente) : '—';
   const total = SES.equipamentos.length;
   const feitos = SES.equipamentos.filter(e => e._salvo).length;
   document.getElementById('exp-summary').textContent = `${feitos} equipamento(s) preenchido(s) de ${total} nesta OS.`;
   const list = document.getElementById('exp-equip-list');
-  list.innerHTML = SES.equipamentos.map((eq, idx) => {
-    const tag = eq.tag || eq.numero_equip || ('EQ-' + (idx+1));
-    return `<div class="equip-card" onclick="gerarPDFUnico(${idx})">
-      <div class="ec-tag">${tag}</div>
-      <div class="ec-tipo">${labelTipo(eq.tipo)}${eq.fabricante?' · '+eq.fabricante:''}</div>
-      <div class="ec-status"><span class="pill pill-pdf">📄 Gerar PDF Individual</span></div>
-    </div>`;
-  }).join('') || '<div class="empty-state"><div class="ei">📋</div>Nenhum equipamento</div>';
-  goTo('t-export');
+  if (!total) {
+    list.innerHTML = '<div class="empty-state"><div class="ei">📋</div><p>Nenhum equipamento salvo nesta OS.<br>Salve ao menos um equipamento para exportar.</p></div>';
+  } else {
+    list.innerHTML = SES.equipamentos.map((eq, idx) => {
+      const tag = eq.tag || eq.numero_equip || ('EQ-' + (idx+1));
+      const naoEnq = eq._nao_enquadrado || eq.status_completude === 'nao_enquadrado';
+      return `<div class="equip-card" onclick="gerarPDFUnico(${idx})">
+        <div class="ec-tag">${esc(tag)}</div>
+        <div class="ec-tipo">${esc(labelTipo(eq.tipo))}${eq.fabricante?' · '+esc(eq.fabricante):''}</div>
+        <div class="ec-status">
+          <span class="pill pill-blue">📄 Gerar PDF ${naoEnq ? '(Não enquadrado)' : 'Individual'}</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
 }
 
 function openExportScreen() {
-  autosaveDraft('before_export');
-  renderExport();
-  const prev = document.getElementById('scr-' + currentScreen);
-  const next = document.getElementById('scr-t-export');
-  if (prev) prev.classList.add('out');
-  setTimeout(() => {
-    if (prev) { prev.classList.add('hidden'); prev.classList.remove('out'); }
-    next.classList.remove('hidden');
-    currentScreen = 't-export';
-  }, 220);
+  try {
+    autosaveDraft('before_export');
+    renderExport();
+    goTo('t-export');
+  } catch(e) {
+    console.error('openExportScreen:', e);
+    showToast('Erro ao abrir exportação: ' + e.message, 'err');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1686,6 +1827,7 @@ async function gerarPDFEquips(indices, completo) {
   showLoading('Gerando PDF…');
   await new Promise(r => setTimeout(r, 80));
 
+  try {
   const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
   const PW=210, PH=297, ML=14, MR=14;
   const CW = PW-ML-MR;
@@ -1725,7 +1867,7 @@ async function gerarPDFEquips(indices, completo) {
       doc.setFont('helvetica','normal');
       doc.setFontSize(8);
       doc.setTextColor(180,205,235);
-      doc.text(limparTxtPDF('ColectTap v1.1  |  ' + dataHoje), PW-MR, 16, {align:'right'});
+      doc.text(limparTxtPDF('ColectTap v1.7  |  ' + dataHoje), PW-MR, 16, {align:'right'});
     } else {
       doc.text('ENGETAP · LEVANTAMENTO NR-13', ML, 11);
       doc.text('Pag. '+pageNum, PW-MR, 11, {align:'right'});
@@ -1848,14 +1990,33 @@ async function gerarPDFEquips(indices, completo) {
 
     // ENQ — ENQUADRAMENTO NR13
     const enquadraVal = d.enquadra_nr13 || '—';
-    const naoEnq = d._nao_enquadrado || enquadraVal === 'Não enquadra conforme 13.2.2';
+    const naoEnq = d._nao_enquadrado || d.status_completude === 'nao_enquadrado' || enquadraVal === 'Não enquadra conforme 13.2.2';
     if (naoEnq) {
       y = secTit(y,'⚠️','Registro de Nao Enquadramento NR13', [180,60,0]);
       y = row1(y,'Enquadramento', enquadraVal, false);
       y = row1(y,'Motivo', d.motivo_nao_enquadramento || '—', true);
       y = row1(y,'Descricao', d.descricao_nao_enquadramento || '—', false);
       y = row1(y,'Acao Recomendada', d.acao_nao_enquadramento || '—', true);
-      y += 2;
+      if (d.obs_gerais) {
+        y=ck(y,10);
+        doc.setFillColor(...LGRAY);doc.rect(ML,y,CW,8,'F');
+        doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(...AZUL2);
+        doc.text('Observacoes:',ML+2,y+4.5);
+        doc.setFont('helvetica','normal');doc.setTextColor(...DARK);
+        const ol=doc.splitTextToSize(limparTxtPDF(d.obs_gerais),CW-4);
+        doc.text(ol,ML+2,y+8.5);
+        y+=Math.max(8,ol.length*4+7);
+      }
+      y+=4;
+      // Nota técnica obrigatória
+      y=ck(y,12);
+      doc.setFillColor(255,247,230);doc.rect(ML,y,CW,10,'F');
+      doc.setDrawColor(180,60,0);doc.setLineWidth(0.5);doc.rect(ML,y,CW,10,'S');
+      doc.setFont('helvetica','italic');doc.setFontSize(7.5);doc.setTextColor(120,40,0);
+      const nota = 'NOTA: Este e um Registro de Nao Enquadramento NR13, nao um Relatorio de Inspecao NR13 completo. O equipamento foi avaliado e nao se enquadra nos criterios da NR13 item 13.2.2.';
+      const notaLines = doc.splitTextToSize(limparTxtPDF(nota), CW-4);
+      doc.text(notaLines, ML+2, y+4);
+      y+=12;
     } else if (enquadraVal !== '—') {
       y = secTit(y,'⚖️','Enquadramento NR13');
       y = row1(y,'Status', enquadraVal, false);
@@ -1871,6 +2032,8 @@ async function gerarPDFEquips(indices, completo) {
       y += 2;
     }
 
+    // Seções A-F só para equipamentos enquadrados
+    if (!naoEnq) {
     // A — IDENTIFICAÇÃO
     y = secTit(y,'A','Identificacao');
     y = row2(y,[{l:'TAG',v:d.tag},{l:'Fabricante',v:d.fabricante}]);
@@ -2032,6 +2195,8 @@ async function gerarPDFEquips(indices, completo) {
       y+=2;
     }
 
+    } // end if(!naoEnq) — seções A-F
+
     // FOTOS — agrupadas por seção
     const fotosPorSecao = normalizarFotosPDF(eq);
     const secaoNomes = {
@@ -2118,8 +2283,13 @@ async function gerarPDFEquips(indices, completo) {
   const suffix = indices.length===1 ? ('_'+( SES.equipamentos[indices[0]].tag || 'EQ'+(indices[0]+1) )) : '_COMPLETO';
   const nome = `Engetap_NR13_${osNum}_${cliente}${suffix}_${dataStr}.pdf`.replace(/\s+/g,'_');
   doc.save(nome);
-  hideLoading();
   showToast('✅ PDF gerado: ' + nome);
+  } catch(e) {
+    console.error('gerarPDFEquips:', e);
+    showToast('Erro ao gerar PDF: ' + e.message, 'err');
+  } finally {
+    hideLoading();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2132,7 +2302,9 @@ function exportarCSV() {
     'Localizacao','Placa_Indelevel','PMTA','P_Trabalho','P_Teste','Temperatura','Fluido',
     'Classe_Fluido','Volume','Diametro','Comprimento','Material','Manometro','Man_Calibrado',
     'Cert_Man','PSV','PSV_Calibrada','Cert_PSV','PA_PSV','Purgador','DCBI',
-    'Trab_Altura','Necessita_TH','Espaco_Confinado','Obs_Gerais','Obs_Inspetor'
+    'Trab_Altura','Necessita_TH','Espaco_Confinado','Obs_Gerais','Obs_Inspetor',
+    'Enquadra_NR13','Motivo_Nao_Enquadramento','Acao_Nao_Enquadramento','Status_Completude',
+    'ID_Equipamento_Colect','Sync_Status'
   ];
   const linhas = SES.equipamentos.map(eq => [
     SES.os?.numero_os, SES.os?.cliente, eq.tag, labelTipo(eq.tipo), eq.fabricante,
@@ -2144,7 +2316,13 @@ function exportarCSV() {
     eq.cert_manometro, eq.possui_valvula, eq.valvula_calibrada, eq.cert_valvula,
     eq.pa_valvula, eq.possui_purgador, eq.possui_dcbi,
     eq.trabalho_altura, eq.necessita_th, eq.espaco_confinado,
-    (eq.obs_gerais||'').replace(/\n/g,' '), (eq.obs_inspetor||'').replace(/\n/g,' ')
+    (eq.obs_gerais||'').replace(/\n/g,' '), (eq.obs_inspetor||'').replace(/\n/g,' '),
+    eq.enquadra_nr13 || '',
+    eq.motivo_nao_enquadramento || '',
+    eq.acao_nao_enquadramento || '',
+    eq.status_completude || (eq._nao_enquadrado ? 'nao_enquadrado' : eq._salvo ? 'salvo' : 'rascunho'),
+    eq.id_equipamento_colect || '',
+    eq.sync_status || 'local'
   ].map(v => '"'+(v===undefined||v===null?'':String(v).replace(/"/g,'""'))+'"').join(','));
 
   const csv = [cabecalho.join(','), ...linhas].join('\r\n');
@@ -2250,7 +2428,6 @@ async function enviarGAS() {
 
   // Garantir IDs e autosave antes do envio
   ensureVisitId();
-  salvarCampos(SECS[SES.secAtual].id);
   autosaveDraft('before_send');
 
   showLoading('Preparando envio…');
@@ -2269,7 +2446,12 @@ async function enviarGAS() {
       data_coleta: new Date().toISOString(),
       equipamentos: SES.equipamentos.map(eq => {
         const { _fotos, _salvo, _ts, ...rest } = eq;
-        return { ...rest, fotos: normalizarFotosParaEnvio(eq) };
+        return {
+          ...rest,
+          id_equipamento_colect: eq.id_equipamento_colect || newEquipId(),
+          fotos: normalizarFotosParaEnvio(eq),
+          status_completude: eq.status_completude || (eq._nao_enquadrado ? 'nao_enquadrado' : 'salvo')
+        };
       })
     };
 
@@ -2296,18 +2478,10 @@ async function enviarGAS() {
           if (ret.drive_folder_id) eq.drive_folder_id  = ret.drive_folder_id;
           if (ret.quantidade_fotos !== undefined) eq.quantidade_fotos = ret.quantidade_fotos;
           if (ret.fotos_json) eq.fotos_json = ret.fotos_json;
+          if (ret.primeira_foto_url) eq.primeira_foto_url = ret.primeira_foto_url;
         }
       });
-      // Persiste rascunho LOCAL (não apaga)
-      if (SES.os?.id_os) {
-        const chave = 'colect_os_' + SES.os.id_os;
-        try {
-          const base = JSON.parse(localStorage.getItem(chave) || '{}');
-          base.sync_status = 'synced';
-          base.updated_at = new Date().toISOString();
-          localStorage.setItem(chave, JSON.stringify(base));
-        } catch(e) {}
-      }
+      saveOSDraft();
       document.getElementById('tc-summary').textContent = SES.equipamentos.length + ' equipamento(s) registrado(s).';
       document.getElementById('tc-id').textContent = r.id || 'LNR-' + Date.now();
       showToast('✅ Dados enviados com sucesso!');
@@ -2341,9 +2515,9 @@ function abrirModalPendencia(secao, campo, label, onConfirm) {
     const obs = document.getElementById('pend-obs').value || '';
     registrarPendencia(secao, campo, label, motivo, obs);
     if (typeof onConfirm === 'function') onConfirm({motivo, obs});
-    closeDialog('modal-pendencia');
+    document.getElementById('modal-pendencia').classList.remove('open');
   };
-  openDialog('modal-pendencia');
+  document.getElementById('modal-pendencia').classList.add('open');
 }
 function registrarPendencia(secao, campo, label, motivo, obs) {
   if (!Array.isArray(SES.pendencias)) SES.pendencias = [];
