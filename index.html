@@ -463,7 +463,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = 'ColectTap-v1.7';
+const APP_VERSION = 'ColectTap-v1.8';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -539,7 +539,7 @@ function persistCurrentEquipDraft(reason='manual') {
   };
   localStorage.setItem(chave, JSON.stringify(payload));
 }
-function autosaveDraft(reason='auto') { if (_dirty !== true) return; persistCurrentEquipDraft(reason); _dirty = false; }
+function autosaveDraft(reason='auto', force=false) { if (!force && _dirty !== true) return; captureCurrentScreenState(reason); _dirty = false; }
 function loadDraftsForOS(id_os) {
   if (!id_os) return null;
   let data = null;
@@ -554,12 +554,39 @@ function loadDraftsForOS(id_os) {
   });
   return data;
 }
-function restoreDraftIfExists() {
+function restoreDraftIfExists() { return; // obsoleta: fluxo seguro via selectOS
+
   if (!SES.os || !SES.os.id_os) return;
   const d = loadDraftsForOS(SES.os.id_os);
   if (!d || !Array.isArray(d.equipamentos) || !d.equipamentos.length) return;
   SES.equipamentos = d.equipamentos.map(e => ({ ...(e.dados||{}), _fotos:(e.fotos||{}), _salvo:true, id_equipamento_colect:e.id_equipamento_colect }));
 }
+
+
+const COLECT_PENDING_KEY = 'colect_pending_sync_v1';
+const COLECT_QUEUE_LIMIT = 30;
+const COLECT_QUEUE_WARN_AT = 20;
+const COLECT_SESSIONS_KEY = 'colect_sessions_v1';
+let _autosaveDebounce = null;
+function safeSetJSON(key, value, label='dados') {
+  try { localStorage.setItem(key, JSON.stringify(value)); return {ok:true}; }
+  catch (error) { showToast('⚠️ Falha ao salvar '+label+' no armazenamento local.', 'warn'); return {ok:false,error}; }
+}
+function captureCurrentScreenState(reason='capture') {
+  try {
+    if (currentScreen === 't5' && SECS && SECS[SES.secAtual]) salvarCampos(SECS[SES.secAtual].id);
+    if (SES.os && SES.os.id_os) persistCurrentEquipDraft(reason);
+    saveOSDraft();
+  } catch(e){ showToast('Falha ao capturar rascunho: '+e.message,'err'); }
+}
+function debounceAutosave(reason='edit',ms=900){ clearTimeout(_autosaveDebounce); _autosaveDebounce=setTimeout(()=>autosaveDraft(reason,true),ms); }
+function temDadosColectPreenchidos(){ return !!(SES.os || (SES.dados && Object.keys(SES.dados).length) || (SES.equipamentos&&SES.equipamentos.length) || colectGetPending().length); }
+function colectGetPending(){ try{return JSON.parse(localStorage.getItem(COLECT_PENDING_KEY)||'[]')}catch{return []} }
+function colectSavePendingQueue(list){ const r=safeSetJSON(COLECT_PENDING_KEY,list,'fila pendente'); colectUpdatePendingBadge(); return r; }
+function colectPayloadSignature(p){ return [p.id_visita_colect,p.id_os,(p.equipamentos||[]).map(e=>e.id_equipamento_colect).join('|'),p.client_updated_at||p.updated_at||''].join('::'); }
+function colectQueuePayload(payload,reason='offline'){ const q=colectGetPending(); const sig=colectPayloadSignature(payload); const i=q.findIndex(x=>x.signature===sig); const item={signature:sig,payload,reason,updated_at:new Date().toISOString()}; if(i>=0) q[i]=item; else q.unshift(item); if(q.length>COLECT_QUEUE_LIMIT){ showToast('Fila local cheia. Conecte ao GAS para continuar.','err'); return {ok:false}; } if(q.length>=COLECT_QUEUE_WARN_AT) showToast('⚠️ Muitas pendências locais: '+q.length,'warn'); return colectSavePendingQueue(q);}
+async function colectFlushPending(){ const q=colectGetPending(); if(!q.length) return; let rest=[]; for (const it of q){ try{ const r=await gasPost('salvarLevantamentoNR13', it.payload); if(!(r&&r.status==='ok')) rest.push(it);} catch{rest.push(it);} } colectSavePendingQueue(rest); if(!rest.length) showToast('✅ Pendências reenviadas com sucesso.'); }
+function colectUpdatePendingBadge(){}
 
 // ═══════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -744,8 +771,8 @@ async function keyOk() {
   _loginInProgress = true;
   document.getElementById('pinStatus').textContent = 'Verificando…';
   if (DEMO_MODE) {
-    if (pin === '1234') { SES.inspetor = {id_inspetor:'INS-001', nome:'Inspetor Demo'}; _loginInProgress = false; afterLogin(); }
-    else if (pin === '5678') { SES.inspetor = {id_inspetor:'INS-002', nome:'Fernando Guimarães'}; _loginInProgress = false; afterLogin(); }
+    if (pin === '1234') { SES.inspetor = {id_inspetor:'INS-001', nome:'Inspetor Demo'}; _loginInProgress = false; afterLogin(); history.pushState({colecttap_guard:true},""); }
+    else if (pin === '5678') { SES.inspetor = {id_inspetor:'INS-002', nome:'Fernando Guimarães'}; _loginInProgress = false; afterLogin(); history.pushState({colecttap_guard:true},""); }
     else { _loginInProgress = false; pinError(); }
     return;
   }
@@ -754,7 +781,7 @@ async function keyOk() {
     if (r && r.status === 'ok' && r.valido === true && (r.id_inspetor || (r.usuario && r.usuario.id))) {
       SES.inspetor = {id_inspetor: r.id_inspetor || (r.usuario && r.usuario.id) || '', nome: r.nome || (r.usuario && r.usuario.nome) || ''};
       _loginInProgress = false;
-      afterLogin();
+      afterLogin(); history.pushState({colecttap_guard:true},"");
     } else {
       _loginInProgress = false;
       pinError();
@@ -1053,7 +1080,7 @@ function toggle(id, label, opts=['Sim','Não','N/A']) {
 }
 
 const TOGGLES_REATIVOS = new Set(['status_documentacao','enquadra_nr13','possui_manometro','possui_valvula','valvula_adequada','modo_medicao_diametro','manometro_calibrado','valvula_calibrada']);
-function setToggle(id, val, el, cls) {
+function setToggle(id, val, el, cls) { markDirty(); debounceAutosave('toggle');
   const row = el.closest('.toggle-row');
   row.querySelectorAll('.toggle-opt').forEach(b => b.className = 'toggle-opt');
   el.classList.add(cls);
@@ -1078,7 +1105,7 @@ function checkList(id, label, items) {
   return `<div class="field"><label>${label}</label><div class="check-list">${checks}</div></div>`;
 }
 
-function toggleCheck(id) {
+function toggleCheck(id) { markDirty(); debounceAutosave('check');
   const ci = document.getElementById('ci_'+id);
   const cb = document.getElementById('cb_'+id);
   if (!ci || !cb) return;
@@ -1535,7 +1562,7 @@ function preparePhoto(key, secao, campo_ref, origem) {
   fi.onchange = handlePhotoSelected;
   fi.click(); // DEVE estar no mesmo callstack do clique do usuário (onclick direto)
 }
-function handlePhotoSelected(event) {
+function handlePhotoSelected(event) { markDirty();
   const fi = event.target;
   const file = fi.files && fi.files[0];
   if (!file || !_photoTarget) return;
@@ -1575,7 +1602,7 @@ function handlePhotoSelected(event) {
   };
   reader.readAsDataURL(file);
 }
-function clearFoto(campo) {
+function clearFoto(campo) { markDirty();
   markDirty();
   delete SES.fotos[campo];
   const body = document.getElementById('t5-body');
@@ -1786,7 +1813,7 @@ function renderExport() {
 
 function openExportScreen() {
   try {
-    autosaveDraft('before_export');
+    autosaveDraft('before_export', true);
     renderExport();
     goTo('t-export');
   } catch(e) {
@@ -2335,6 +2362,7 @@ function exportarCSV() {
   a.click();
   URL.revokeObjectURL(url);
   showToast('✅ CSV exportado!');
+  autosaveDraft('after_csv', true);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2428,7 +2456,7 @@ async function enviarGAS() {
 
   // Garantir IDs e autosave antes do envio
   ensureVisitId();
-  autosaveDraft('before_send');
+  autosaveDraft('before_send', true);
 
   showLoading('Preparando envio…');
   await new Promise(r => setTimeout(r, 80));
@@ -2498,9 +2526,12 @@ async function enviarGAS() {
 // ═══════════════════════════════════════════════════════════════
 // AUTOSAVE LISTENERS
 // ═══════════════════════════════════════════════════════════════
-window.addEventListener('blur', () => autosaveDraft('blur'));
-document.addEventListener('visibilitychange', () => { if (document.hidden) autosaveDraft('hidden'); });
+window.addEventListener('blur', () => autosaveDraft('blur', true));
+document.addEventListener('visibilitychange', () => { if (document.hidden) autosaveDraft('hidden', true); });
 setInterval(() => autosaveDraft('interval'), AUTOSAVE_INTERVAL_MS);
+window.addEventListener('beforeunload', (e)=>{ if(temDadosColectPreenchidos()){ autosaveDraft('beforeunload', true); e.preventDefault(); e.returnValue=''; }});
+window.addEventListener('popstate', (e)=>{ if (e.state && e.state.colecttap_guard && temDadosColectPreenchidos()){ history.pushState({colecttap_guard:true},''); if(confirm('Existem dados preenchidos. Deseja salvar antes de sair?')) autosaveDraft('popstate', true); }});
+window.addEventListener('online', ()=>colectFlushPending());
 
 // ═══════════════════════════════════════════════════════════════
 // MODAL PENDÊNCIA
@@ -2519,7 +2550,7 @@ function abrirModalPendencia(secao, campo, label, onConfirm) {
   };
   document.getElementById('modal-pendencia').classList.add('open');
 }
-function registrarPendencia(secao, campo, label, motivo, obs) {
+function registrarPendencia(secao, campo, label, motivo, obs) { markDirty(); debounceAutosave('pendencia');
   if (!Array.isArray(SES.pendencias)) SES.pendencias = [];
   SES.pendencias.push({ secao, campo, label, motivo, observacao: obs, created_at: new Date().toISOString(), inspetor: SES.inspetor ? SES.inspetor.nome : '', status: 'pendente' });
   markDirty();
