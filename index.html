@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v1.9 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v2.0 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -253,7 +253,7 @@ input[type=file]{display:none}
     <div class="pin-logo">
       <div class="pl-badge">COLECT</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · NR-13 · v1.6</div>
+      <div class="pl-sub">Engetap · NR-13 · v2.0</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
@@ -488,7 +488,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = 'ColectTap-v1.9';
+const APP_VERSION = 'ColectTap-v2.0';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -550,7 +550,7 @@ function persistCurrentEquipDraft(reason='manual') {
     id_equipamento_colect: SES.id_equipamento_colect,
     tipo: SES.tipoEquip || SES.dados.tipo || '',
     dados: {...SES.dados},
-    fotos: {...SES.fotos},
+    fotos: _stripDataUrls({...SES.fotos}),   // ← sem dataUrl no localStorage
     pendencias: [...(SES.pendencias || [])],
     status_completude: 'rascunho',
     created_at: base.created_at || now,
@@ -1645,7 +1645,7 @@ function handlePhotoSelected(event) { markDirty();
   };
   reader.readAsDataURL(file);
 }
-function clearFoto(campo) { markDirty();
+function clearFoto(campo) {
   markDirty();
   delete SES.fotos[campo];
   const body = document.getElementById('t5-body');
@@ -1777,6 +1777,23 @@ function renderT6() {
 // ═══════════════════════════════════════════════════════════════
 // SALVAR EQUIPAMENTO
 // ═══════════════════════════════════════════════════════════════
+// Remove dataUrl das fotos antes de salvar no localStorage para evitar QuotaExceededError.
+// Os dataUrls continuam em memória (SES.fotos / eq._fotos) durante a sessão.
+function _stripDataUrls(fotosObj) {
+  if (!fotosObj || typeof fotosObj !== 'object') return {};
+  const stripped = {};
+  Object.entries(fotosObj).forEach(([k, v]) => {
+    if (k.endsWith('_label')) { stripped[k] = v; return; }
+    if (v && typeof v === 'object') {
+      const { dataUrl, ...meta } = v;
+      stripped[k] = { ...meta, _hasData: !!dataUrl };
+    } else {
+      stripped[k] = v;
+    }
+  });
+  return stripped;
+}
+
 function saveOSDraft(reason) {
   if (!SES.os || !SES.os.id_os) return;
   const chave = 'colect_os_' + SES.os.id_os;
@@ -1791,7 +1808,7 @@ function saveOSDraft(reason) {
       id_equipamento_colect: id_equipamento_colect || newEquipId(),
       tipo: tipo || dadosPuros.tipo || '',
       dados: dadosPuros,
-      fotos: _fotos || {},
+      fotos: _stripDataUrls(_fotos || {}),   // ← sem dataUrl no localStorage
       pendencias: _pendencias || [],
       status_completude: status_completude || (_nao_enquadrado ? 'nao_enquadrado' : _salvo ? 'salvo' : 'rascunho'),
       sync_status: sync_status || 'local',
@@ -1813,7 +1830,7 @@ function saveOSDraft(reason) {
         id_equipamento_colect: SES.currentEquipId,
         tipo: SES.tipoEquip || tipo || dadosPuros.tipo || '',
         dados: dadosPuros,
-        fotos: SES.fotos || {},
+        fotos: _stripDataUrls(SES.fotos || {}),  // ← sem dataUrl no localStorage
         pendencias: SES.pendencias || [],
         status_completude: 'rascunho',
         sync_status: 'local',
@@ -1833,7 +1850,7 @@ function saveOSDraft(reason) {
     equipSerializados[SES.equipEdit] = {
       ...equipSerializados[SES.equipEdit],
       dados: { ...equipSerializados[SES.equipEdit].dados, ...dadosPuros },
-      fotos: { ...equipSerializados[SES.equipEdit].fotos, ...SES.fotos },
+      fotos: _stripDataUrls({ ...equipSerializados[SES.equipEdit].fotos, ...SES.fotos }),  // ← sem dataUrl
       pendencias: SES.pendencias || equipSerializados[SES.equipEdit].pendencias,
       updated_at: now,
     };
@@ -1993,7 +2010,7 @@ async function gerarPDFEquips(indices, completo) {
       doc.setFont('helvetica','normal');
       doc.setFontSize(8);
       doc.setTextColor(180,205,235);
-      doc.text(limparTxtPDF('ColectTap v1.7  |  ' + dataHoje), PW-MR, 16, {align:'right'});
+      doc.text(limparTxtPDF('ColectTap v2.0  |  ' + dataHoje), PW-MR, 16, {align:'right'});
     } else {
       doc.text('ENGETAP · LEVANTAMENTO NR-13', ML, 11);
       doc.text('Pag. '+pageNum, PW-MR, 11, {align:'right'});
@@ -2684,10 +2701,10 @@ function abrirModalPendencia(secao, campo, label, onConfirm) {
   };
   document.getElementById('modal-pendencia').classList.add('open');
 }
-function registrarPendencia(secao, campo, label, motivo, obs) { markDirty(); debounceAutosave('pendencia');
+function registrarPendencia(secao, campo, label, motivo, obs) {
+  markDirty(); debounceAutosave('pendencia');
   if (!Array.isArray(SES.pendencias)) SES.pendencias = [];
   SES.pendencias.push({ secao, campo, label, motivo, observacao: obs, created_at: new Date().toISOString(), inspetor: SES.inspetor ? SES.inspetor.nome : '', status: 'pendente' });
-  markDirty();
 }
 
 // ═══════════════════════════════════════════════════════════════
