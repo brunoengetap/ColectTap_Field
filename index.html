@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v2.0 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v2.1 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -230,6 +230,16 @@ input[type=file]{display:none}
 .rev-label{color:var(--text2);flex:1}
 .rev-value{color:var(--text);font-weight:600;text-align:right;max-width:55%}
 
+/* CAMPO INCOMPLETO — destaque visual ao avançar com campos vazios */
+.field.campo-incompleto label{color:var(--warn)}
+.field.campo-incompleto input,.field.campo-incompleto select,.field.campo-incompleto textarea{border-color:var(--warn)!important;background:rgba(245,158,11,.07)}
+.field.campo-incompleto .toggle-row{outline:2px solid var(--warn);border-radius:10px}
+.campo-incompleto-banner{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.5);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--warn);margin-bottom:14px;display:flex;align-items:center;gap:8px;line-height:1.4}
+
+/* BOTÃO LIXEIRA no equip-card */
+.ec-del{background:none;border:none;cursor:pointer;font-size:16px;padding:4px 8px;border-radius:8px;color:var(--text3);transition:color .15s,background .15s;flex-shrink:0;line-height:1}
+.ec-del:active{color:var(--danger);background:rgba(239,68,68,.12)}
+
 /* EXPORT ACTIONS */
 .export-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
 .export-btn{display:flex;flex-direction:column;align-items:center;gap:8px;padding:18px 12px;border:1px solid var(--border);border-radius:14px;background:var(--surf);cursor:pointer;transition:all .15s;text-align:center}
@@ -253,7 +263,7 @@ input[type=file]{display:none}
     <div class="pin-logo">
       <div class="pl-badge">COLECT</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · NR-13 · v2.0</div>
+      <div class="pl-sub">Engetap · NR-13 · v2.1</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
@@ -448,6 +458,21 @@ input[type=file]{display:none}
   </div>
 </div>
 
+<!-- MODAL CAMPOS INCOMPLETOS -->
+<div class="dialog-overlay" id="modal-incompleto">
+  <div class="dialog">
+    <div class="dialog-head">⚠️ Campos não preenchidos</div>
+    <div class="dialog-body">
+      <div id="inc-lista" style="margin-bottom:12px;display:flex;flex-direction:column;gap:6px"></div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.5">Os campos acima foram destacados em laranja. Você pode preencher agora ou continuar mesmo assim.</div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost btn-sm" style="flex:1" id="inc-btn-preencher" onclick="closeDialog('modal-incompleto')">← Preencher</button>
+      <button class="btn btn-warn btn-sm" style="flex:1" id="inc-btn-continuar">Continuar mesmo assim →</button>
+    </div>
+  </div>
+</div>
+
 <div class="dialog-overlay" id="modal-pendencia">
   <div class="dialog" style="max-width:560px">
     <div class="dialog-head">Campo não preenchido</div>
@@ -488,7 +513,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = 'ColectTap-v2.0';
+const APP_VERSION = 'ColectTap-v2.1';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -933,6 +958,15 @@ function selectOS(id) {
 // T3 — EQUIPAMENTOS DA OS
 // ═══════════════════════════════════════════════════════════════
 function renderT3() {
+  // Limpar estado de edição em andamento para evitar duplicatas no autosave
+  SES.equipEdit = null;
+  SES.currentEquipId = null;
+  SES.id_equipamento_colect = null;
+  SES.dados = {};
+  SES.fotos = {};
+  SES.pendencias = [];
+  SES.tipoEquip = null;
+
   document.getElementById('t3-os-num').textContent = SES.os.numero_os;
   document.getElementById('t3-cliente').textContent = SES.os.cliente;
   const total = SES.equipamentos.length;
@@ -947,14 +981,17 @@ function renderT3() {
       const tipo = labelTipo(eq.tipo);
       const done = eq._salvo;
       const naoEnq = eq._nao_enquadrado || eq.status_completude === 'nao_enquadrado';
-      return `<div class="equip-card ${done?'done':''}" onclick="editarEquip(${idx})">
-        <div class="ec-tag">${esc(tag)}</div>
-        <div class="ec-tipo">${esc(tipo)}${eq.fabricante ? ' · ' + esc(eq.fabricante) : ''}</div>
-        <div class="ec-status">
-          ${naoEnq ? '<span class="pill pill-warn">⚠️ Não enquadrado NR13</span>' : done ? '<span class="pill pill-ok">✓ Completo</span>' : '<span class="pill pill-warn">⏳ Em andamento</span>'}
-          ${!naoEnq && eq.categoria ? '<span class="pill pill-blue">Cat. ' + esc(eq.categoria) + '</span>' : ''}
-          ${eq.possui_foto ? '<span class="pill pill-gray">📷</span>' : ''}
+      return `<div class="equip-card ${done?'done':''}" style="display:flex;align-items:flex-start;gap:10px">
+        <div style="flex:1;min-width:0" onclick="editarEquip(${idx})">
+          <div class="ec-tag">${esc(tag)}</div>
+          <div class="ec-tipo">${esc(tipo)}${eq.fabricante ? ' · ' + esc(eq.fabricante) : ''}</div>
+          <div class="ec-status">
+            ${naoEnq ? '<span class="pill pill-warn">⚠️ Não enquadrado NR13</span>' : done ? '<span class="pill pill-ok">✓ Completo</span>' : '<span class="pill pill-warn">⏳ Em andamento</span>'}
+            ${!naoEnq && eq.categoria ? '<span class="pill pill-blue">Cat. ' + esc(eq.categoria) + '</span>' : ''}
+            ${eq.possui_foto ? '<span class="pill pill-gray">📷</span>' : ''}
+          </div>
         </div>
+        <button class="ec-del" onclick="confirmarApagarEquip(${idx})" title="Apagar equipamento">🗑️</button>
       </div>`;
     }).join('');
   }
@@ -963,6 +1000,23 @@ function renderT3() {
 
 function labelTipo(t) {
   return {vaso:'Vaso de Pressão',caldeira:'Caldeira',tubulacao:'Tubulação',tanque:'Tanque Metálico'}[t] || t || '—';
+}
+
+function confirmarApagarEquip(idx) {
+  const eq = SES.equipamentos[idx];
+  const tag = eq.tag || eq.numero_equip || ('EQ-' + (idx+1));
+  openDialog(
+    'Apagar equipamento?',
+    `"${tag}" será removido desta OS. Esta ação não pode ser desfeita.`,
+    '🗑️ Apagar',
+    () => {
+      SES.equipamentos.splice(idx, 1);
+      saveOSDraft('apagar-equip');
+      showToast('Equipamento removido.');
+      renderT3();
+    },
+    true
+  );
 }
 
 function abrirNovoEquip() {
@@ -1014,7 +1068,85 @@ const SECS = [
   { id:'obs',           label:'H — Obs / Fotos / Revisão',   icon:'📷',  pct:100 },
 ];
 
-// ── HELPER: NÃO ENQUADRAMENTO ──
+// ── CAMPOS OBRIGATÓRIOS POR SEÇÃO ──
+// Cada entrada: { id: 'f_campo' | 'toggle:campo', label: 'Label legível' }
+// 'toggle:X' = campo do tipo toggle (verificado via SES.dados[X])
+// 'f_X'       = input/select/textarea (verificado via DOM)
+const CAMPOS_OBRIGATORIOS = {
+  enquadramento: [
+    { id: 'toggle:enquadra_nr13', label: 'Enquadramento NR13' },
+  ],
+  ident: [
+    { id: 'f_tag',          label: 'TAG / Código de Identificação' },
+    { id: 'f_fabricante',   label: 'Fabricante' },
+    { id: 'f_categoria',    label: 'Categoria NR-13' },
+    { id: 'toggle:placa_indelevel', label: 'Placa de identificação indelével' },
+  ],
+  projeto: [
+    { id: 'f_pmta',         label: 'PMTA (kgf/cm²)' },
+    { id: 'f_fluido',       label: 'Fluido de Trabalho' },
+    { id: 'f_classe_fluido',label: 'Classe do Fluido' },
+  ],
+  dimensoes: [],   // dimensões variam muito por tipo — não obrigatório forçar
+  disp: [
+    { id: 'toggle:possui_manometro', label: 'Possui manômetro?' },
+    { id: 'toggle:possui_valvula',   label: 'Possui válvula de segurança (PSV)?' },
+  ],
+  docs: [],
+  servico: [
+    { id: 'toggle:trabalho_altura', label: 'Requer trabalho em altura?' },
+  ],
+  obs: [],
+};
+
+// Retorna lista de campos incompletos da seção atual
+function validarSecaoAtual() {
+  const secId = SECS[SES.secAtual].id;
+  const obrig = CAMPOS_OBRIGATORIOS[secId] || [];
+  const faltando = [];
+
+  obrig.forEach(c => {
+    if (c.id.startsWith('toggle:')) {
+      const key = c.id.replace('toggle:', '');
+      if (!SES.dados[key]) faltando.push(c);
+    } else {
+      const el = document.getElementById(c.id);
+      if (el && !el.value.trim()) faltando.push(c);
+    }
+  });
+  return faltando;
+}
+
+// Destaca campos incompletos no DOM
+function destacarCamposIncompletos(lista) {
+  // Limpar destaques anteriores
+  document.querySelectorAll('#t5-body .field.campo-incompleto').forEach(el => el.classList.remove('campo-incompleto'));
+  document.getElementById('t5-body').querySelectorAll('.campo-incompleto-banner').forEach(el => el.remove());
+
+  if (!lista.length) return;
+
+  lista.forEach(c => {
+    let el;
+    if (c.id.startsWith('toggle:')) {
+      const key = c.id.replace('toggle:', '');
+      // Encontra o .field que contém o toggle com data-id=key
+      const toggleEl = document.querySelector(`#t5-body .toggle-opt[data-id="${key}"]`);
+      el = toggleEl ? toggleEl.closest('.field') : null;
+    } else {
+      const input = document.getElementById(c.id);
+      el = input ? input.closest('.field') : null;
+    }
+    if (el) el.classList.add('campo-incompleto');
+  });
+
+  // Banner no topo do body
+  const banner = document.createElement('div');
+  banner.className = 'campo-incompleto-banner';
+  banner.innerHTML = `⚠️ <span>${lista.length} campo(s) recomendado(s) não preenchido(s). Role para ver os destaques em laranja.</span>`;
+  const body = document.getElementById('t5-body');
+  body.prepend(banner);
+  body.scrollTop = 0;
+}
 function isNaoEnquadrado() {
   return SES.dados.enquadra_nr13 === 'Não enquadra conforme 13.2.2';
 }
@@ -1054,7 +1186,7 @@ function secNext() {
   markDirty();
   salvarCampos(SECS[SES.secAtual].id);
 
-  // Se não enquadrado na seção 0, encerrar aqui
+  // Seção não-enquadrado: sem validação de campos extras
   if (SES.secAtual === 0 && isNaoEnquadrado()) {
     SES.dados._nao_enquadrado = true;
     SES.dados.status_completude = 'nao_enquadrado';
@@ -1062,6 +1194,31 @@ function secNext() {
     return;
   }
 
+  const faltando = validarSecaoAtual();
+  if (faltando.length > 0) {
+    // Destaca campos no DOM antes de abrir o modal
+    destacarCamposIncompletos(faltando);
+    // Preenche lista no modal
+    document.getElementById('inc-lista').innerHTML = faltando.map(c =>
+      `<div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2)">
+        <span style="color:var(--warn)">⚠️</span><span>${c.label}</span>
+      </div>`
+    ).join('');
+    // Botão "Continuar mesmo assim" executa o avanço real
+    document.getElementById('inc-btn-continuar').onclick = () => {
+      closeDialog('modal-incompleto');
+      _secNextExecutar();
+    };
+    document.getElementById('modal-incompleto').classList.add('open');
+    return;
+  }
+
+  _secNextExecutar();
+}
+
+function _secNextExecutar() {
+  // Remove destaques caso existam
+  document.querySelectorAll('#t5-body .field.campo-incompleto').forEach(el => el.classList.remove('campo-incompleto'));
   if (SES.secAtual < SECS.length - 1) {
     SES.secAtual++;
     renderT5();
@@ -2010,7 +2167,7 @@ async function gerarPDFEquips(indices, completo) {
       doc.setFont('helvetica','normal');
       doc.setFontSize(8);
       doc.setTextColor(180,205,235);
-      doc.text(limparTxtPDF('ColectTap v2.0  |  ' + dataHoje), PW-MR, 16, {align:'right'});
+      doc.text(limparTxtPDF('ColectTap v2.1  |  ' + dataHoje), PW-MR, 16, {align:'right'});
     } else {
       doc.text('ENGETAP · LEVANTAMENTO NR-13', ML, 11);
       doc.text('Pag. '+pageNum, PW-MR, 11, {align:'right'});
