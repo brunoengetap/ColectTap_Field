@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v2.2 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v2.3 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -298,7 +298,7 @@ input[type=file]{display:none}
     <div class="pin-logo">
       <div class="pl-badge">COLECT</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · NR-13 · v2.2</div>
+      <div class="pl-sub">Engetap · NR-13 · v2.3</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
@@ -618,7 +618,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = 'ColectTap-v2.2';
+const APP_VERSION = 'ColectTap-v2.3';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -781,14 +781,14 @@ function getSecoesFluxo() {
   };
   if (modo === 'documento') {
     return [
-      { ...base.docs, pct:13 }, { ...base.projeto, pct:26 }, { ...base.enquadramento, pct:40 },
+      { ...base.enquadramento, pct:13 }, { ...base.docs, pct:26 }, { ...base.projeto, pct:40 },
       { ...base.ident, pct:55 }, { ...base.dimensoes, pct:68 }, { ...base.disp, pct:80 },
       { ...base.servico, pct:91 }, { ...base.obs, pct:100 },
     ];
   }
   return [
-    { ...base.ident, pct:13 }, { ...base.dimensoes, pct:26 }, { ...base.disp, pct:40 },
-    { ...base.servico, pct:55 }, { ...base.enquadramento, pct:68 }, { ...base.obs, pct:80 },
+    { ...base.enquadramento, pct:13 }, { ...base.ident, pct:26 }, { ...base.dimensoes, pct:40 },
+    { ...base.disp, pct:55 }, { ...base.servico, pct:68 }, { ...base.obs, pct:80 },
     { ...base.docs, pct:91 }, { ...base.projeto, pct:100 },
   ];
 }
@@ -1036,16 +1036,34 @@ function renderT2() {
     goTo('t2');
     return;
   }
-  body.innerHTML = SES._osList.map(os => `
-    <div class="os-card" onclick="selectOS('${os.id_os}')">
-      <div class="os-num">${os.numero_os}</div>
+  body.innerHTML = SES._osList.map(os => {
+    // Lê rascunho local para mostrar contador de equipamentos
+    const draft = loadDraftsForOS(os.id_os);
+    const equips = (draft && Array.isArray(draft.equipamentos)) ? draft.equipamentos : [];
+    const total = equips.length;
+    const salvos = equips.filter(e => e.status_completude && e.status_completude !== 'rascunho').length;
+    const iniciada = total > 0;
+    const equipPill = iniciada
+      ? `<span class="pill ${salvos > 0 ? 'pill-ok' : 'pill-warn'}">⚙️ ${salvos}/${total} equip.</span>`
+      : '';
+    const statusPill = iniciada
+      ? `<span class="pill pill-pend" style="font-size:10px">▶ OS iniciada</span>`
+      : '';
+    return `
+    <div class="os-card" onclick="selectOS('${os.id_os}')" style="${iniciada ? 'border-color:var(--pend)' : ''}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div class="os-num">${os.numero_os}</div>
+        ${iniciada ? `<div style="font-size:11px;font-weight:700;color:var(--pend);white-space:nowrap;padding-top:3px">▶ Iniciada</div>` : ''}
+      </div>
       <div class="os-cli">${os.cliente}</div>
       <div class="os-desc">${os.descricao || ''}</div>
       <div class="os-meta">
         <span class="pill pill-blue">🔬 NR-13</span>
         <span class="pill pill-gray">📅 ${formatDate(os.data_abertura)}</span>
+        ${equipPill}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   goTo('t2');
 }
 
@@ -1382,8 +1400,23 @@ function renderT5() {
   const modo = SES.modoColetaInicial || SES.dados.modo_coleta_inicial || 'campo';
   document.getElementById('t5-modo-icon').textContent = modo === 'documento' ? '📁' : '🔧';
   document.getElementById('t5-modo-label').textContent = modo === 'documento' ? 'Fluxo: Documentação' : 'Fluxo: Equipamento em campo';
-  document.getElementById('t5-origem-sec').textContent = { campo:'🔧 Campo', documento:'📁 Documento', hibrido:'⚖️ Híbrido' }[sec.origem] || '';
-  document.getElementById('t5-btn-alternar').textContent = modo === 'documento' ? '🔧 Ir para campo' : '📁 Ir para docs';
+
+  // Origem da seção atual — determina o label do botão de alternância
+  const origemSec = sec.origem || 'hibrido';
+  document.getElementById('t5-origem-sec').textContent = { campo:'🔧 Campo', documento:'📁 Documento', hibrido:'⚖️ Híbrido' }[origemSec] || '';
+
+  // O botão mostra PARA ONDE ir: se a seção atual é de campo → oferecer "Ir para docs"; se é de docs → "Ir para campo"
+  // Para seções híbridas ou enquadramento: usa o oposto do modo atual
+  let btnAlternarText;
+  if (origemSec === 'campo') {
+    btnAlternarText = '📁 Ir para docs';
+  } else if (origemSec === 'documento') {
+    btnAlternarText = '🔧 Ir para campo';
+  } else {
+    // hibrido: usa oposto do modo atual
+    btnAlternarText = modo === 'documento' ? '🔧 Ir para campo' : '📁 Ir para docs';
+  }
+  document.getElementById('t5-btn-alternar').textContent = btnAlternarText;
 
   const body = document.getElementById('t5-body');
   body.innerHTML = renderSecao(sec.id);
@@ -1479,13 +1512,22 @@ function alternarModoColeta() {
   salvarCampos(secAtualId());
   const modoAtual = SES.modoColetaInicial || SES.dados.modo_coleta_inicial || 'campo';
   const secIdAtual = secAtualObj().id;
+  const origemSec = secAtualObj().origem || 'hibrido';
   const novoModo = modoAtual === 'campo' ? 'documento' : 'campo';
   SES.modoColetaInicial = novoModo;
   SES.dados.modo_coleta_inicial = novoModo;
   SES.dados.data_ultima_alternancia_fluxo = new Date().toISOString();
   const novoFluxo = getSecoesFluxo();
-  const novoIdx = novoFluxo.findIndex(s => s.id === secIdAtual);
-  SES.secAtual = novoIdx >= 0 ? novoIdx : 0;
+
+  // Tenta manter a mesma seção se existir no novo fluxo
+  let novoIdx = novoFluxo.findIndex(s => s.id === secIdAtual);
+  if (novoIdx < 0) {
+    // Seção não existe no novo fluxo: vai para a primeira seção da origem destino
+    const origemDestino = novoModo === 'documento' ? 'documento' : 'campo';
+    novoIdx = novoFluxo.findIndex(s => s.origem === origemDestino);
+    if (novoIdx < 0) novoIdx = 0;
+  }
+  SES.secAtual = novoIdx;
   markDirty();
   renderT5();
   showToast(novoModo === 'documento' ? '📁 Modo documentação ativado' : '🔧 Modo campo ativado');
