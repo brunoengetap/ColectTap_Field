@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v2.3 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v2.4 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -298,7 +298,7 @@ input[type=file]{display:none}
     <div class="pin-logo">
       <div class="pl-badge">COLECT</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · NR-13 · v2.3</div>
+      <div class="pl-sub">Engetap · NR-13 · v2.4</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
@@ -618,7 +618,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = 'ColectTap-v2.3';
+const APP_VERSION = 'ColectTap-v2.4';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -2439,7 +2439,7 @@ async function gerarPDFEquips(indices, completo) {
 
   const AZUL   = [26,58,107];
   const AZUL2  = [46,91,168];
-  const LARANJA= [14,165,233]; // usa accent do ColectTap
+  const CIANO  = [14,165,233];
   const DARK   = [30,40,55];
   const LGRAY  = [240,244,250];
   const MGRAY  = [200,210,225];
@@ -2447,60 +2447,122 @@ async function gerarPDFEquips(indices, completo) {
   const WHITE  = [255,255,255];
   const RED    = [239,68,68];
 
-  let pageNum = 1;
+  let pageNum = 0; // será incrementado na primeira página real
   const agora = new Date();
-  const dataHoje = agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  const dataHoje = agora.toLocaleDateString('pt-BR');
+  const horaHoje = agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 
-  function hdr(isFirst) {
+  // ── Logo Engetap em SVG → desenhada como formas no PDF ──────────
+  // Representa o símbolo "E" angular da Engetap de forma vetorial
+  function desenharLogoEngetap(x, y, size) {
+    // size = altura total do símbolo em mm (~12mm para rodapé, ~30mm para capa)
+    const s = size / 30; // fator de escala (base desenhada em 30 unidades)
+    const lw = 1.2 * s;
+    doc.setDrawColor(26, 58, 107);
+    doc.setLineWidth(lw);
+    // Elemento externo — frame do E
+    doc.setFillColor(26, 58, 107);
+    // Barra superior
+    doc.rect(x, y, 18*s, 3*s, 'F');
+    // Barra vertical esquerda
+    doc.rect(x, y, 3*s, 30*s, 'F');
+    // Barra do meio (azul ciano)
+    doc.setFillColor(14,165,233);
+    doc.rect(x, y+12*s, 13*s, 3*s, 'F');
+    // Barra inferior
+    doc.setFillColor(26, 58, 107);
+    doc.rect(x, y+27*s, 18*s, 3*s, 'F');
+    // Detalhe diagonal (acento azul)
+    doc.setFillColor(14,165,233);
+    // Triângulo simplificado como retângulo inclinado — representado por um rect menor
+    doc.rect(x+14*s, y+1*s, 4*s, 10*s, 'F');
+  }
+
+  // Contexto do equipamento atual para cabeçalhos
+  let _currentEq = null;
+
+  function hdrPage(eq) {
+    // Cabeçalho completo para páginas de conteúdo (2ª página em diante)
+    const HDR_H = 20;
+    // Fundo gradiente simulado
     doc.setFillColor(...AZUL);
-    doc.rect(0,0,PW,isFirst?32:18,'F');
-    doc.setFillColor(...LARANJA);
-    doc.rect(0,isFirst?30:16,PW,2,'F');
+    doc.rect(0, 0, PW, HDR_H, 'F');
+    doc.setFillColor(...CIANO);
+    doc.rect(0, HDR_H-2, PW, 2, 'F');
+
+    // Mini logo à esquerda
+    desenharLogoEngetap(ML, 3, 10);
+
+    // Nome do cliente + equipamento (centro)
+    const cliente = limparTxtPDF(SES.os ? SES.os.cliente : 'Cliente');
+    const tag = eq ? limparTxtPDF(eq.tag || eq.numero_equip || 'Equipamento') : '';
+    const tipo = eq ? limparTxtPDF(labelTipo(eq.tipo)) : '';
     doc.setFont('helvetica','bold');
-    doc.setFontSize(isFirst?13:9);
+    doc.setFontSize(8.5);
     doc.setTextColor(...WHITE);
-    if (isFirst) {
-      doc.text('ENGETAP ENGENHARIA LTDA', ML, 10);
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(8);
-      doc.setTextColor(180,205,235);
-      doc.text('CREA-MG 64.569  |  Inspeções NR-13  |  Divinópolis-MG', ML, 16);
-      doc.setFont('helvetica','bold');
-      doc.setFontSize(11);
-      doc.setTextColor(...WHITE);
-      doc.text(limparTxtPDF('LEVANTAMENTO DE EQUIPAMENTOS NR-13'), PW-MR, 10, {align:'right'});
-      doc.setFont('helvetica','normal');
-      doc.setFontSize(8);
-      doc.setTextColor(180,205,235);
-      doc.text(limparTxtPDF('ColectTap v2.2  |  ' + dataHoje), PW-MR, 16, {align:'right'});
-    } else {
-      doc.text('ENGETAP · LEVANTAMENTO NR-13', ML, 11);
-      doc.text('Pag. '+pageNum, PW-MR, 11, {align:'right'});
-    }
-  }
-
-  function ftr() {
-    const y = PH-8;
-    doc.setFillColor(...LGRAY);
-    doc.rect(0,PH-12,PW,12,'F');
+    doc.text(cliente.toUpperCase(), PW/2, 6, {align:'center'});
     doc.setFont('helvetica','normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(180, 210, 240);
+    doc.text(tag + (tipo ? ' · ' + tipo : ''), PW/2, 11, {align:'center'});
+
+    // Data e técnico (direita)
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(160, 195, 230);
+    const tecnico = limparTxtPDF(SES.inspetor?.nome || '—');
+    doc.text(dataHoje, PW-MR, 6, {align:'right'});
+    doc.text('Tec: ' + tecnico, PW-MR, 11, {align:'right'});
+
+    // Paginação
+    doc.setFont('helvetica','bold');
     doc.setFontSize(7);
-    doc.setTextColor(100,120,150);
-    const os = SES.os ? SES.os.numero_os + ' · ' + SES.os.cliente : '';
-    doc.text(limparTxtPDF('Engetap Engenharia Ltda · CREA-MG 64.569 · ' + os), ML, y);
-    doc.text('Pag. '+pageNum, PW-MR, y, {align:'right'});
+    doc.setTextColor(...WHITE);
+    doc.text('Pag. ' + pageNum, PW-MR, 16.5, {align:'right'});
+
+    return HDR_H + 3; // y inicial do conteúdo
   }
 
-  function newPage() {
-    ftr();
+  function ftr(eq) {
+    const FTR_H = 10;
+    const fy = PH - FTR_H;
+    doc.setFillColor(235, 240, 250);
+    doc.rect(0, fy, PW, FTR_H, 'F');
+    doc.setDrawColor(...MGRAY);
+    doc.setLineWidth(0.3);
+    doc.line(0, fy, PW, fy);
+
+    // Mini logo no rodapé
+    desenharLogoEngetap(ML, fy + 1.5, 6);
+
+    // Dados da empresa
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(6);
+    doc.setTextColor(...AZUL);
+    doc.text('ENGETAP ENGENHARIA LTDA', ML + 10, fy + 4);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(90, 110, 150);
+    doc.text('CREA-MG 64.569 · Inspeções NR-13 · Divinopolis-MG · (37) 3XXX-XXXX', ML + 10, fy + 7.5);
+
+    // OS à direita
+    const os = SES.os ? 'OS ' + limparTxtPDF(SES.os.numero_os) : '';
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(6);
+    doc.setTextColor(100,120,150);
+    doc.text(os, PW-MR, fy + 4, {align:'right'});
+    doc.text('Pag. ' + pageNum, PW-MR, fy + 7.5, {align:'right'});
+  }
+
+  function newPage(eq) {
+    ftr(eq);
     doc.addPage();
     pageNum++;
-    hdr(false);
-    return 22;
+    const startY = hdrPage(eq || _currentEq);
+    return startY;
   }
 
-  function ck(y, need) {
-    return (y+need > PH-16) ? newPage() : y;
+  function ck(y, need, eq) {
+    return (y + need > PH - 14) ? newPage(eq || _currentEq) : y;
   }
 
   function secTit(y, icon, title, cor) {
@@ -2561,35 +2623,214 @@ async function gerarPDFEquips(indices, completo) {
     return y+rh+1;
   }
 
+  // ── CAPA ────────────────────────────────────────────────────────
+  function gerarCapa(eq) {
+    // Fundo superior azul escuro (2/3 da página)
+    doc.setFillColor(...AZUL);
+    doc.rect(0, 0, PW, 180, 'F');
+    // Faixa decorativa ciano
+    doc.setFillColor(...CIANO);
+    doc.rect(0, 174, PW, 6, 'F');
+    // Fundo inferior branco suave
+    doc.setFillColor(245, 248, 255);
+    doc.rect(0, 180, PW, PH-180, 'F');
+
+    // ── Logo grande centralizada no topo ──
+    // Bloco com background levemente mais claro
+    doc.setFillColor(35, 70, 130);
+    doc.roundedRect(PW/2 - 40, 20, 80, 60, 4, 4, 'F');
+    // Logo (símbolo)
+    desenharLogoEngetap(PW/2 - 18, 28, 26);
+    // Nome ENGETAP
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(18);
+    doc.setTextColor(...WHITE);
+    doc.text('ENGETAP', PW/2 + 8, 43);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(7);
+    doc.setTextColor(...CIANO);
+    doc.text('INSPECOES EM VASOS DE PRESSAO', PW/2 + 8, 49);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(6);
+    doc.setTextColor(180, 210, 240);
+    doc.text('CREA-MG 64.569', PW/2 + 8, 54);
+
+    // ── Título do relatório ──
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(20);
+    doc.setTextColor(...WHITE);
+    doc.text('LEVANTAMENTO DE', PW/2, 105, {align:'center'});
+    doc.text('EQUIPAMENTOS NR-13', PW/2, 116, {align:'center'});
+    // Linha decorativa
+    doc.setDrawColor(...CIANO);
+    doc.setLineWidth(1.2);
+    doc.line(ML+20, 122, PW-MR-20, 122);
+
+    // Subtítulo ColectTap
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(180, 210, 240);
+    doc.text('ColectTap v2.4  |  Gerado em: ' + dataHoje + ' ' + horaHoje, PW/2, 130, {align:'center'});
+
+    // ── Bloco de dados do cliente ──
+    const bx=ML+10, bw=CW-20;
+    doc.setFillColor(20, 45, 90);
+    doc.roundedRect(bx, 140, bw, 30, 3, 3, 'F');
+    doc.setDrawColor(...CIANO);
+    doc.setLineWidth(0.8);
+    doc.roundedRect(bx, 140, bw, 30, 3, 3, 'S');
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(7);
+    doc.setTextColor(...CIANO);
+    doc.text('DADOS DA ORDEM DE SERVICO', bx+6, 148);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...WHITE);
+    const cliente = SES.os ? SES.os.cliente : '—';
+    const osNum   = SES.os ? SES.os.numero_os : '—';
+    doc.setFont('helvetica','bold');
+    doc.text(limparTxtPDF('Cliente: '), bx+6, 156);
+    doc.setFont('helvetica','normal');
+    doc.text(limparTxtPDF(cliente), bx+28, 156);
+    doc.setFont('helvetica','bold');
+    doc.text(limparTxtPDF('OS: '), bx+6, 163);
+    doc.setFont('helvetica','normal');
+    doc.text(limparTxtPDF(osNum), bx+17, 163);
+    doc.setFont('helvetica','bold');
+    doc.text(limparTxtPDF('Data: '), bx+80, 163);
+    doc.setFont('helvetica','normal');
+    doc.text(dataHoje, bx+96, 163);
+
+    // ── Dados do equipamento (se individual) ──
+    if (eq) {
+      const tag  = eq.tag || eq.numero_equip || '—';
+      const tipo = labelTipo(eq.tipo);
+      const tec  = SES.inspetor?.nome || '—';
+      doc.setFillColor(240, 248, 255);
+      doc.roundedRect(ML, 188, CW, 50, 3, 3, 'F');
+      doc.setDrawColor(...AZUL2);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(ML, 188, CW, 50, 3, 3, 'S');
+
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(7);
+      doc.setTextColor(...AZUL);
+      doc.text('DADOS DO EQUIPAMENTO', ML+5, 196);
+      doc.setDrawColor(...CIANO);
+      doc.setLineWidth(0.4);
+      doc.line(ML+5, 198, ML+CW-5, 198);
+
+      const campos = [
+        ['TAG / Identificacao:', tag],
+        ['Tipo:', tipo],
+        ['Tecnico Responsavel:', tec],
+        ['Data da Coleta:', dataHoje],
+      ];
+      let cy = 204;
+      campos.forEach(([l, v]) => {
+        doc.setFont('helvetica','bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...AZUL2);
+        doc.text(limparTxtPDF(l), ML+5, cy);
+        doc.setFont('helvetica','normal');
+        doc.setTextColor(...DARK);
+        doc.text(limparTxtPDF(String(v||'—')), ML+58, cy);
+        cy += 8;
+      });
+    } else {
+      // Relatório completo — lista os equipamentos
+      const total = indices.length;
+      doc.setFillColor(240, 248, 255);
+      doc.roundedRect(ML, 188, CW, Math.min(50, 10 + total*8), 3, 3, 'F');
+      doc.setDrawColor(...AZUL2);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(ML, 188, CW, Math.min(50, 10 + total*8), 3, 3, 'S');
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(7);
+      doc.setTextColor(...AZUL);
+      doc.text('EQUIPAMENTOS INCLUIDOS NESTE RELATORIO: ' + total, ML+5, 196);
+      doc.setDrawColor(...CIANO);
+      doc.setLineWidth(0.4);
+      doc.line(ML+5, 198, ML+CW-5, 198);
+      let cy = 204;
+      indices.slice(0,5).forEach((idx, i) => {
+        const e = SES.equipamentos[idx];
+        const tagE = limparTxtPDF((e.tag || e.numero_equip || ('EQ-'+(idx+1))) + ' — ' + labelTipo(e.tipo));
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(...DARK);
+        doc.text((i+1)+'. '+tagE, ML+5, cy);
+        cy += 7;
+      });
+      if (total > 5) {
+        doc.setFont('helvetica','italic');
+        doc.setFontSize(7);
+        doc.setTextColor(120,140,170);
+        doc.text('... e mais '+(total-5)+' equipamento(s)', ML+5, cy);
+      }
+    }
+
+    // ── Rodapé da capa ──
+    doc.setFillColor(...AZUL);
+    doc.rect(0, PH-20, PW, 20, 'F');
+    desenharLogoEngetap(ML, PH-17, 9);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(180, 210, 240);
+    doc.text('Engetap Engenharia Ltda · CREA-MG 64.569 · Divinopolis-MG', ML+14, PH-12);
+    doc.text('Levantamento NR-13 · Documento Tecnico Sigiloso', ML+14, PH-7);
+    doc.setTextColor(...CIANO);
+    doc.setFont('helvetica','bold');
+    doc.text('engetap.com.br', PW-MR, PH-12, {align:'right'});
+  }
+
   // ── LOOP POR EQUIPAMENTO ──
+  let primeiraEquipamentoGlobal = true;
   for (let ii=0; ii<indices.length; ii++) {
-    if (ii>0) newPage();
     const eq = SES.equipamentos[indices[ii]];
+    _currentEq = eq;
     const d = eq;
     const tag = d.tag || d.numero_equip || ('EQ-'+(indices[ii]+1));
     const tipo = labelTipo(d.tipo);
 
-    hdr(ii===0);
-    let y = ii===0 ? 36 : 22;
+    // ── CAPA DE CADA EQUIPAMENTO (individual ou por equip no completo) ──
+    if (!primeiraEquipamentoGlobal) {
+      // Para PDF completo: nova capa por equipamento
+      ftr(eq);
+      doc.addPage();
+      pageNum++;
+    } else {
+      pageNum = 1;
+    }
+    primeiraEquipamentoGlobal = false;
 
-    // Cabeçalho do equipamento
-    doc.setFillColor(...LARANJA,0.15);
-    doc.setFillColor(14,165,233);
-    doc.rect(ML,y,CW,10,'F');
+    // Gerar capa (individual = eq, completo = null na primeira, eq nas seguintes)
+    gerarCapa(indices.length === 1 ? eq : eq);
+
+    // ── Primeira página de conteúdo ──
+    ftr(eq);
+    doc.addPage();
+    pageNum++;
+    let y = hdrPage(eq);
+
+    // Cabeçalho do equipamento na primeira página de conteúdo
+    y=ck(y,14,eq);
+    doc.setFillColor(...CIANO);
+    doc.rect(ML,y,CW,11,'F');
     doc.setFont('helvetica','bold');
     doc.setFontSize(13);
     doc.setTextColor(...WHITE);
-    doc.text(limparTxtPDF(tag + '  ·  ' + tipo.toUpperCase()), ML+4, y+7);
-    y+=13;
+    doc.text(limparTxtPDF(tag + '  ·  ' + tipo.toUpperCase()), ML+4, y+7.5);
+    y+=14;
 
     // OS / Cliente
-    y=ck(y,8);
+    y=ck(y,8,eq);
     doc.setFillColor(...LGRAY);
     doc.rect(ML,y,CW,7,'F');
     doc.setFont('helvetica','normal');
     doc.setFontSize(8);
     doc.setTextColor(...DARK);
-    const osLbl = SES.os ? 'OS: ' + SES.os.numero_os + '  |  Cliente: ' + SES.os.cliente + '  |  Inspetor: ' + (SES.inspetor?.nome||'—') : '';
+    const osLbl = SES.os ? 'OS: ' + SES.os.numero_os + '  |  Cliente: ' + SES.os.cliente + '  |  Tecnico: ' + (SES.inspetor?.nome||'—') + '  |  Data: ' + dataHoje : '';
     doc.text(limparTxtPDF(osLbl), ML+3, y+5);
     y+=9;
 
@@ -2814,27 +3055,41 @@ async function gerarPDFEquips(indices, completo) {
 
     } // end if(!naoEnq) — seções A-F
 
-    // FOTOS — agrupadas por seção
+    // FOTOS — agrupadas por seção, sem lacunas
     const fotosPorSecao = normalizarFotosPDF(eq);
     const secaoNomes = {
       enquadramento: 'Enquadramento NR13',
-      ident:         'Identificação / Placa',
-      docs:          'Documentação',
+      ident:         'Identificacao / Placa',
+      docs:          'Documentacao',
       projeto:       'Dados de Projeto',
-      dimensoes:     'Dimensões',
-      disp:          'Dispositivos de Segurança',
-      servico:       'Instalação e Acesso',
-      obs:           'Observações / Anomalias',
+      dimensoes:     'Dimensoes',
+      disp:          'Dispositivos de Seguranca',
+      servico:       'Instalacao e Acesso',
+      obs:           'Observacoes / Anomalias',
     };
     const todasAsFotos = normalizarFotosParaEnvio(eq);
     if (todasAsFotos.length) {
-      y = newPage();
+      // Página nova de fotos
+      y = newPage(eq);
       const COLS=2, GAP=4;
       const PW2=(CW-GAP*(COLS-1))/COLS;
-      const MAX_H=62;
-      const CAP_H=9;
+      const MAX_H=65;
+      const CAP_H=10;
 
-      // Iterar por seção conhecida, depois o que sobrar
+      // Título da seção de fotos
+      doc.setFillColor(40, 60, 100);
+      doc.rect(ML, y, CW, 9, 'F');
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(10);
+      doc.setTextColor(...WHITE);
+      doc.text('REGISTRO FOTOGRAFICO', ML+3, y+6.2);
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(180, 210, 240);
+      doc.text(limparTxtPDF(tag + ' · ' + tipo), PW-MR, y+6.2, {align:'right'});
+      y += 12;
+
+      // Iterar por seção conhecida, depois o que sobrar — SOMENTE seções com fotos
       const secsOrdem = Object.keys(secaoNomes);
       const secsFotos = { ...fotosPorSecao };
       const ordenadas = [];
@@ -2843,55 +3098,126 @@ async function gerarPDFEquips(indices, completo) {
 
       for (const [secId, fotos] of ordenadas) {
         const secNome = secaoNomes[secId] || secId.replace(/_/g,' ');
-        y = ck(y, 12);
-        y = secTit(y, '📷', 'Registro Fotografico — ' + secNome, [60, 80, 120]);
-        y += 3;
-        let col=0, rowY=y, rowMaxH=0;
-        for (const ph of fotos) {
-          const ratio=(ph.h||600)/(ph.w||800);
-          const imgH=Math.min(MAX_H,PW2*ratio);
-          const blockH=imgH+CAP_H+4;
-          if (!rowMaxH) rowMaxH=blockH;
-          y=ck(rowY,blockH);
-          if (y!==rowY&&col!==0){col=0;rowY=y;rowMaxH=blockH;}
-          const x=ML+col*(PW2+GAP);
-          doc.setFillColor(240,245,255);doc.rect(x,y,PW2,blockH,'F');
-          doc.setDrawColor(...MGRAY);doc.setLineWidth(0.3);doc.rect(x,y,PW2,blockH,'S');
-          try {
-            let w2=PW2-2, h2=imgH-2;
-            const r2=(ph.w||800)/(ph.h||600);
-            if(w2/r2>h2){w2=h2*r2;}else{h2=w2/r2;}
-            doc.addImage(ph.dataUrl,'JPEG',x+1,y+1,w2,h2);
-          } catch(e) {
-            doc.setFont('helvetica','italic');doc.setFontSize(7);doc.setTextColor(150,150,150);
-            doc.text('Erro ao carregar imagem',x+2,y+imgH/2);
+        // Título da sub-seção
+        y = ck(y, 14, eq);
+        doc.setFillColor(220, 232, 250);
+        doc.rect(ML, y, CW, 7, 'F');
+        doc.setDrawColor(...AZUL2);
+        doc.setLineWidth(0.4);
+        doc.rect(ML, y, CW, 7, 'S');
+        doc.setFillColor(...CIANO);
+        doc.rect(ML, y, 3, 7, 'F');
+        doc.setFont('helvetica','bold');
+        doc.setFontSize(8);
+        doc.setTextColor(...AZUL);
+        doc.text(limparTxtPDF(secNome.toUpperCase()), ML+6, y+4.8);
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(7);
+        doc.setTextColor(100,130,170);
+        doc.text(fotos.length + ' foto(s)', PW-MR, y+4.8, {align:'right'});
+        y += 9;
+
+        // ── Grid de fotos sem lacunas: colocar as fotos compactadas ──
+        // Calcular alturas reais de cada foto
+        const fotoBlocks = fotos.map(ph => {
+          const ratio = (ph.h && ph.w) ? (ph.h / ph.w) : (3/4);
+          const imgH = Math.min(MAX_H, PW2 * ratio);
+          const blockH = imgH + CAP_H;
+          return { ph, imgH, blockH };
+        });
+
+        // Distribuir em linhas de 2, verificando quebra de página por linha
+        let i = 0;
+        while (i < fotoBlocks.length) {
+          const left  = fotoBlocks[i];
+          const right = i+1 < fotoBlocks.length ? fotoBlocks[i+1] : null;
+          const lineH = right ? Math.max(left.blockH, right.blockH) : left.blockH;
+
+          // Verificar se cabe na página atual
+          if (y + lineH > PH - 18) {
+            y = newPage(eq);
           }
-          const legenda = ph.label || LEGENDAS_TECNICAS[ph.key] || ph.key.replace(/foto_/,'').replace(/_/g,' ');
-          doc.setFont('helvetica','italic');doc.setFontSize(6.5);doc.setTextColor(80,100,130);
-          const legTxt = limparTxtPDF(legenda);
-          const legLines = doc.splitTextToSize(legTxt, PW2-4);
-          doc.text(legLines[0], x+PW2/2, y+imgH+5.5, {align:'center'});
-          col++;
-          if(col>=COLS){col=0;rowY+=rowMaxH+GAP;rowMaxH=0;y=rowY;}
+
+          // Desenhar foto esquerda
+          const drawFoto = (fb, colIdx) => {
+            const x = ML + colIdx * (PW2 + GAP);
+            // Fundo da célula
+            doc.setFillColor(245, 248, 255);
+            doc.rect(x, y, PW2, lineH, 'F');
+            doc.setDrawColor(...MGRAY);
+            doc.setLineWidth(0.25);
+            doc.rect(x, y, PW2, lineH, 'S');
+            // Imagem
+            try {
+              let w2 = PW2 - 4, h2 = fb.imgH - 2;
+              const r2 = (fb.ph.w||800) / (fb.ph.h||600);
+              if (w2/r2 > h2) { w2 = h2 * r2; } else { h2 = w2 / r2; }
+              const imgX = x + (PW2 - w2) / 2;
+              const imgY = y + 1;
+              doc.addImage(fb.ph.dataUrl, 'JPEG', imgX, imgY, w2, h2);
+            } catch(_) {
+              doc.setFillColor(230, 235, 245);
+              doc.rect(x+2, y+2, PW2-4, fb.imgH-4, 'F');
+              doc.setFont('helvetica','italic');
+              doc.setFontSize(6.5);
+              doc.setTextColor(150,160,180);
+              doc.text('Foto indisponivel', x + PW2/2, y + fb.imgH/2, {align:'center'});
+            }
+            // Legenda
+            const legenda = fb.ph.label || LEGENDAS_TECNICAS[fb.ph.key] || fb.ph.key.replace(/foto_/,'').replace(/_/g,' ');
+            doc.setFont('helvetica','bold');
+            doc.setFontSize(6);
+            doc.setTextColor(...AZUL2);
+            const legTxt = doc.splitTextToSize(limparTxtPDF(legenda), PW2-4);
+            doc.text(legTxt[0], x + PW2/2, y + lineH - 4, {align:'center'});
+            if (legTxt[1]) doc.text(legTxt[1], x + PW2/2, y + lineH - 1, {align:'center'});
+          };
+
+          drawFoto(left, 0);
+          if (right) drawFoto(right, 1);
+
+          y += lineH + GAP;
+          i += right ? 2 : 1;
         }
-        y = Math.max(y, rowY+rowMaxH+3);
+        y += 3;
       }
     }
 
-    // Assinatura
-    y=ck(y,30);
-    y+=6;
-    doc.setDrawColor(...MGRAY);doc.setLineWidth(0.3);
-    doc.line(ML,y+14,ML+70,y+14);
-    doc.line(ML+80,y+14,ML+150,y+14);
-    doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(120,130,150);
-    doc.text(limparTxtPDF('Inspetor: '+(SES.inspetor?.nome||'_____________________')),ML,y+18);
-    doc.text('Data: ___/___/______',ML+82,y+18);
-    doc.text('CREA/CAU: ___________________',ML,y+24);
-    doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(...AZUL);
-    doc.text('Engetap Engenharia Ltda · CREA-MG 64.569',PW-MR,y+24,{align:'right'});
+    // ── Assinatura / Encerramento ──────────────────────────────────
+    y = ck(y, 38, eq);
+    y += 6;
+    // Linha de assinatura
+    doc.setFillColor(245, 248, 255);
+    doc.rect(ML, y, CW, 30, 'F');
+    doc.setDrawColor(...MGRAY);
+    doc.setLineWidth(0.3);
+    doc.rect(ML, y, CW, 30, 'S');
+    // Título
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...AZUL);
+    doc.text('ASSINATURA E RESPONSABILIDADE TECNICA', ML+3, y+5.5);
+    doc.setDrawColor(...CIANO);
+    doc.setLineWidth(0.4);
+    doc.line(ML+3, y+7, ML+CW-3, y+7);
+    // Linhas de assinatura
+    doc.setDrawColor(...MGRAY);
+    doc.setLineWidth(0.3);
+    doc.line(ML+5, y+18, ML+85, y+18);
+    doc.line(ML+95, y+18, ML+CW-5, y+18);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(7);
+    doc.setTextColor(100,120,150);
+    doc.text(limparTxtPDF('Tecnico: '+(SES.inspetor?.nome||'________________________________')), ML+5, y+22);
+    doc.text('Data: ___/___/______', ML+96, y+22);
+    doc.text('CREA/CAU: _______________', ML+5, y+27);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(7);
+    doc.setTextColor(...AZUL);
+    doc.text('Engetap Engenharia Ltda · CREA-MG 64.569', PW-MR, y+27, {align:'right'});
+    y += 32;
 
-    ftr();
+    ftr(eq);
   }
 
   const cliente = SES.os ? SES.os.cliente.replace(/[^\w\s]/g,'').substring(0,20).trim() : 'Colect';
