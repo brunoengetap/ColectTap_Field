@@ -711,13 +711,8 @@ function loadDraftsForOS(id_os) {
   });
   return data;
 }
-function restoreDraftIfExists() { return; // obsoleta: fluxo seguro via selectOS
-
-  if (!SES.os || !SES.os.id_os) return;
-  const d = loadDraftsForOS(SES.os.id_os);
-  if (!d || !Array.isArray(d.equipamentos) || !d.equipamentos.length) return;
-  SES.equipamentos = d.equipamentos.map(e => ({ ...(e.dados||{}), _fotos:(e.fotos||{}), _salvo:true, id_equipamento_colect:e.id_equipamento_colect }));
-}
+// obsoleta: fluxo seguro via selectOS
+function restoreDraftIfExists() { return; }
 
 
 const COLECT_PENDING_KEY = 'colect_pending_sync_v1';
@@ -1089,6 +1084,7 @@ function selectOS(id) {
     SES.equipamentos = [];
   }
   if (draft && draft.id_visita_colect) SES.id_visita_colect = draft.id_visita_colect;
+  if (draft && draft.modoColetaInicial) SES.modoColetaInicial = draft.modoColetaInicial;
   renderT3();
 }
 
@@ -1347,7 +1343,7 @@ function _iniciarWatcherScroll() {
   if (body._scrollHandler) body.removeEventListener('scroll', body._scrollHandler);
   body._scrollHandler = _checarScroll;
   body.addEventListener('scroll', _checarScroll, { passive: true });
-  setTimeout(_checarScroll, 150);
+  requestAnimationFrame(() => setTimeout(_checarScroll, 80));
 }
 
 function _pararWatcherScroll() {
@@ -1445,13 +1441,17 @@ function secNext() {
 
 function _registrarPendenciasFaltando(faltando) {
   if (faltando.campo.length > 0 || faltando.hibrido.length > 0) {
-    const campos = [...faltando.campo, ...faltando.hibrido].map(c => c.label).join(', ');
-    SES.dados.pendencias_campo = SES.dados.pendencias_campo ? SES.dados.pendencias_campo + '; ' + campos : campos;
+    const novos = [...faltando.campo, ...faltando.hibrido].map(c => c.label);
+    const existentes = SES.dados.pendencias_campo ? SES.dados.pendencias_campo.split('; ') : [];
+    const set = new Set([...existentes, ...novos]);
+    SES.dados.pendencias_campo = [...set].join('; ');
     SES.dados.status_coleta_campo = 'parcial';
   }
   if (faltando.documento.length > 0) {
-    const docs = faltando.documento.map(c => c.label).join(', ');
-    SES.dados.pendencias_documentais = SES.dados.pendencias_documentais ? SES.dados.pendencias_documentais + '; ' + docs : docs;
+    const novos = faltando.documento.map(c => c.label);
+    const existentes = SES.dados.pendencias_documentais ? SES.dados.pendencias_documentais.split('; ') : [];
+    const set = new Set([...existentes, ...novos]);
+    SES.dados.pendencias_documentais = [...set].join('; ');
     SES.dados.status_coleta_documentos = 'parcial';
   }
 }
