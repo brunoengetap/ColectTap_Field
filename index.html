@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v2.5 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v2.6 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -314,7 +314,7 @@ input[type=file]{display:none}
     <div class="pin-logo">
       <div class="pl-badge">COLECT</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · NR-13 · v2.5</div>
+      <div class="pl-sub">Engetap · NR-13 · v2.6</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
@@ -654,7 +654,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = 'ColectTap-v2.5';
+const APP_VERSION = '2.6';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -2799,7 +2799,7 @@ async function gerarPDFEquips(indices, completo) {
     doc.setFont('helvetica','normal');
     doc.setFontSize(8);
     doc.setTextColor(180, 210, 240);
-    doc.text('ColectTap v2.5  |  Gerado em: ' + dataHoje + ' ' + horaHoje, PW/2, 130, {align:'center'});
+    doc.text('ColectTap v2.6  |  Gerado em: ' + dataHoje + ' ' + horaHoje, PW/2, 130, {align:'center'});
 
     // ── Bloco de dados do cliente ──
     const bx=ML+10, bw=CW-20;
