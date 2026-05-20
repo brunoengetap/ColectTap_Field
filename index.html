@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ColectTap v2.4 — Levantamento NR-13 · Engetap</title>
+<title>ColectTap v2.5 — Levantamento NR-13 · Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -314,7 +314,7 @@ input[type=file]{display:none}
     <div class="pin-logo">
       <div class="pl-badge">COLECT</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · NR-13 · v2.4</div>
+      <div class="pl-sub">Engetap · NR-13 · v2.5</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
@@ -515,7 +515,8 @@ input[type=file]{display:none}
   </div>
   <div class="body">
     <div class="info-box" id="exp-summary">Equipamentos coletados: —</div>
-    <p class="sec-label">Relatórios PDF</p>
+
+    <p class="sec-label">Relatórios PDF (Campo)</p>
     <div class="export-grid">
       <div class="export-btn pdf-btn" onclick="gerarPDFEquip('individual')">
         <div class="eb-icon">📄</div>
@@ -528,6 +529,7 @@ input[type=file]{display:none}
         <div class="eb-sub">Todos em um arquivo</div>
       </div>
     </div>
+
     <p class="sec-label">Planilha de Dados</p>
     <div class="export-grid">
       <div class="export-btn xls-btn" onclick="exportarCSV()">
@@ -535,13 +537,31 @@ input[type=file]{display:none}
         <div class="eb-label">Exportar CSV</div>
         <div class="eb-sub">Abrir no Excel</div>
       </div>
-      <div class="export-btn upload-btn" onclick="enviarGAS()">
-        <div class="eb-icon">☁️</div>
-        <div class="eb-label">Enviar ao GAS</div>
-        <div class="eb-sub">Salvar no Google Sheets</div>
+    </div>
+
+    <div style="height:1px;background:var(--border);margin:16px 0"></div>
+
+    <p class="sec-label">Enviar para Relatório Oficial</p>
+    <div class="warn-box" style="margin-bottom:12px">
+      ☁️ Selecione os equipamentos finalizados e envie para o escritório gerar o relatório NR-13 oficial. Após o envio, o equipamento fica marcado como <strong>liberado</strong> e pode ser reenviado se necessário.
+    </div>
+
+    <div id="exp-envio-list"></div>
+
+    <div class="export-grid" style="margin-top:12px">
+      <div class="export-btn upload-btn" onclick="enviarSelecionados()">
+        <div class="eb-icon">📤</div>
+        <div class="eb-label">Enviar Selecionados</div>
+        <div class="eb-sub">Equipamentos marcados</div>
+      </div>
+      <div class="export-btn" style="border-color:var(--ok);background:rgba(34,197,94,.08)" onclick="enviarOSCompleta()">
+        <div class="eb-icon">✅</div>
+        <div class="eb-label">OS Completa</div>
+        <div class="eb-sub">Marcar tudo como pronto</div>
       </div>
     </div>
-    <div class="warn-box">💡 Gere o PDF individual de cada equipamento para entrega ao cliente. Use o PDF Completo para revisar tudo de uma vez.</div>
+
+    <div style="height:1px;background:var(--border);margin:16px 0"></div>
     <p class="sec-label">Selecionar equipamento para PDF Individual</p>
     <div id="exp-equip-list"></div>
   </div>
@@ -1528,20 +1548,20 @@ function alternarModoColeta() {
   salvarCampos(secAtualId());
   const modoAtual = SES.modoColetaInicial || SES.dados.modo_coleta_inicial || 'campo';
   const secIdAtual = secAtualObj().id;
-  const origemSec = secAtualObj().origem || 'hibrido';
   const novoModo = modoAtual === 'campo' ? 'documento' : 'campo';
   SES.modoColetaInicial = novoModo;
   SES.dados.modo_coleta_inicial = novoModo;
   SES.dados.data_ultima_alternancia_fluxo = new Date().toISOString();
   const novoFluxo = getSecoesFluxo();
 
-  // Tenta manter a mesma seção se existir no novo fluxo
-  let novoIdx = novoFluxo.findIndex(s => s.id === secIdAtual);
+  // Vai SEMPRE para a primeira seção exclusiva do novo modo,
+  // evitando ficar na mesma seção quando ela existe em ambos os fluxos.
+  const origemDestino = novoModo === 'documento' ? 'documento' : 'campo';
+  let novoIdx = novoFluxo.findIndex(s => s.origem === origemDestino);
   if (novoIdx < 0) {
-    // Seção não existe no novo fluxo: vai para a primeira seção da origem destino
-    const origemDestino = novoModo === 'documento' ? 'documento' : 'campo';
-    novoIdx = novoFluxo.findIndex(s => s.origem === origemDestino);
-    if (novoIdx < 0) novoIdx = 0;
+    // Fallback: tenta manter a seção atual se existir no novo fluxo
+    novoIdx = novoFluxo.findIndex(s => s.id === secIdAtual);
+    if (novoIdx < 0) novoIdx = 1; // pós-enquadramento
   }
   SES.secAtual = novoIdx;
   markDirty();
@@ -2779,7 +2799,7 @@ async function gerarPDFEquips(indices, completo) {
     doc.setFont('helvetica','normal');
     doc.setFontSize(8);
     doc.setTextColor(180, 210, 240);
-    doc.text('ColectTap v2.4  |  Gerado em: ' + dataHoje + ' ' + horaHoje, PW/2, 130, {align:'center'});
+    doc.text('ColectTap v2.5  |  Gerado em: ' + dataHoje + ' ' + horaHoje, PW/2, 130, {align:'center'});
 
     // ── Bloco de dados do cliente ──
     const bx=ML+10, bw=CW-20;
