@@ -654,7 +654,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.7';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -2490,10 +2490,17 @@ function _fotosDisponiveis(eq) {
   // Retorna array { key, label, dataUrl? } das fotos disponíveis para seleção de capa
   const out = [];
   const src = eq._fotos || {};
+  // Fonte secundária: SES.fotos em memória (para o equipamento em edição ativa)
+  const memFotos = (SES.equipEdit !== null && SES.equipamentos[SES.equipEdit] === eq)
+    ? (SES.fotos || {})
+    : {};
   Object.entries(src).forEach(([k, v]) => {
     if (k.endsWith('_label') || !v) return;
     if (v.dataUrl || v._hasData) {
-      out.push({ key: v.key || k, label: src[(v.key||k)+'_label'] || v.label || LEGENDAS_TECNICAS[v.key||k] || k, dataUrl: v.dataUrl || null });
+      const fKey = v.key || k;
+      // Preferir dataUrl da memória (SES.fotos) se não sobreviveu ao localStorage
+      const dataUrl = v.dataUrl || (memFotos[fKey] && memFotos[fKey].dataUrl) || null;
+      out.push({ key: fKey, label: src[(fKey)+'_label'] || v.label || LEGENDAS_TECNICAS[fKey] || k, dataUrl });
     }
   });
   // Fallback: fotos_json (sem dataUrl mas com key/label)
