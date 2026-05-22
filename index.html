@@ -654,7 +654,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = '2.8';
+const APP_VERSION = '2.9';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -922,6 +922,17 @@ function goTo(id) {
     });
     next.classList.remove('hidden');
     currentScreen = id;
+    // Reset de estado ao chegar em t3 via back — previne autosave duplicar rascunhos
+    if (id === 't3' && SES.os) {
+      SES.equipEdit             = null;
+      SES.currentEquipId        = null;
+      SES.id_equipamento_colect = null;
+      SES.dados                 = {};
+      SES.fotos                 = {};
+      SES.pendencias            = [];
+      SES.tipoEquip             = null;
+      SES.origemRespostas       = {};
+    }
     _navLock = false;
     if (_pendingScreen && _pendingScreen !== currentScreen) {
       const p = _pendingScreen;
@@ -2116,12 +2127,25 @@ function handlePhotoSelected(event) { markDirty();
       const key = target.key;
       const equipId = ensureEquipId();
       const legendaDefault = LEGENDAS_TECNICAS[key] || key.replace(/foto_/, '').replace(/_/g, ' ');
+      // Gerar thumbUrl (máx 80px, JPEG 0.5) — persiste no localStorage via _stripDataUrls
+      let thumbUrl = null;
+      try {
+        const THUMB_MAX = 80;
+        let tw = w, th = h;
+        const tmx = Math.max(tw, th);
+        if (tmx > THUMB_MAX) { const tr = THUMB_MAX / tmx; tw = Math.round(tw * tr); th = Math.round(th * tr); }
+        const tc = document.createElement('canvas');
+        tc.width = tw; tc.height = th;
+        tc.getContext('2d').drawImage(img, 0, 0, tw, th);
+        thumbUrl = tc.toDataURL('image/jpeg', 0.5);
+      } catch(e) { thumbUrl = null; }
       SES.fotos[key] = {
         key,
         label: SES.fotos[key + '_label'] || legendaDefault,
         secao: target.secao,
         campo_ref: target.campo_ref,
         dataUrl, w, h,
+        thumbUrl,           // ← ADICIONADO
         origem: target.origem,
         created_at: new Date().toISOString(),
         id_equipamento_colect: equipId
@@ -2277,8 +2301,8 @@ function _stripDataUrls(fotosObj) {
   Object.entries(fotosObj).forEach(([k, v]) => {
     if (k.endsWith('_label')) { stripped[k] = v; return; }
     if (v && typeof v === 'object') {
-      const { dataUrl, ...meta } = v;
-      stripped[k] = { ...meta, _hasData: !!dataUrl };
+      const { dataUrl, thumbUrl, ...meta } = v;
+      stripped[k] = { ...meta, thumbUrl: thumbUrl || null, _hasData: !!dataUrl };
     } else {
       stripped[k] = v;
     }
@@ -2490,20 +2514,20 @@ function _fotosDisponiveis(eq) {
   // Retorna array { key, label, dataUrl? } das fotos disponíveis para seleção de capa
   const out = [];
   const src = eq._fotos || {};
-  // Fonte secundária: SES.fotos em memória (para o equipamento em edição ativa)
-  const memFotos = (SES.equipEdit !== null && SES.equipamentos[SES.equipEdit] === eq)
-    ? (SES.fotos || {})
-    : {};
   Object.entries(src).forEach(([k, v]) => {
     if (k.endsWith('_label') || !v) return;
-    if (v.dataUrl || v._hasData) {
+    if (v.dataUrl || v._hasData || v.thumbUrl) {
       const fKey = v.key || k;
-      // Preferir dataUrl da memória (SES.fotos) se não sobreviveu ao localStorage
-      const dataUrl = v.dataUrl || (memFotos[fKey] && memFotos[fKey].dataUrl) || null;
-      out.push({ key: fKey, label: src[(fKey)+'_label'] || v.label || LEGENDAS_TECNICAS[fKey] || k, dataUrl });
+      // Prioridade: dataUrl (memória) → thumbUrl (localStorage) → null (emoji)
+      const dataUrl = v.dataUrl || v.thumbUrl || null;
+      out.push({
+        key: fKey,
+        label: src[(fKey) + '_label'] || v.label || LEGENDAS_TECNICAS[fKey] || k,
+        dataUrl
+      });
     }
   });
-  // Fallback: fotos_json (sem dataUrl mas com key/label)
+  // Fallback: fotos_json retornado pelo GAS após upload no Drive
   if (!out.length && eq.fotos_json) {
     try {
       const parsed = JSON.parse(eq.fotos_json);
