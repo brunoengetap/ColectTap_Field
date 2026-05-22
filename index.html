@@ -654,7 +654,7 @@ input[type=file]{display:none}
 // ═══════════════════════════════════════════════════════════════
 // URL de produção do ColectTap GAS — manter igual no Field e Manager
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbyFERcJg2F-mKO8KgyBVonmw2veKMAYkdWhn9t2cWTlgnNSAsf5iAF6hCbnpiQAy0Iw/exec';
-const APP_VERSION = '2.9';
+const APP_VERSION = '2.10';
 
 function esc(v) {
   return String(v == null ? '' : v)
@@ -913,6 +913,20 @@ function goTo(id) {
   if (id === currentScreen) return;
   if (_navLock) { _pendingScreen = id; return; }
   _navLock = true;
+
+  // v2.10: reset ANTES do setTimeout — elimina race condition com blur/visibilitychange
+  // que podem disparar autosaveDraft durante os 220ms da animação e inserir rascunhos duplicados
+  if (id === 't3' && SES.os) {
+    SES.equipEdit             = null;
+    SES.currentEquipId        = null;
+    SES.id_equipamento_colect = null;
+    SES.dados                 = {};
+    SES.fotos                 = {};
+    SES.pendencias            = [];
+    SES.tipoEquip             = null;
+    SES.origemRespostas       = {};
+  }
+
   const prev = document.getElementById('scr-' + currentScreen);
   if (prev) prev.classList.add('out');
   setTimeout(() => {
@@ -922,17 +936,6 @@ function goTo(id) {
     });
     next.classList.remove('hidden');
     currentScreen = id;
-    // Reset de estado ao chegar em t3 via back — previne autosave duplicar rascunhos
-    if (id === 't3' && SES.os) {
-      SES.equipEdit             = null;
-      SES.currentEquipId        = null;
-      SES.id_equipamento_colect = null;
-      SES.dados                 = {};
-      SES.fotos                 = {};
-      SES.pendencias            = [];
-      SES.tipoEquip             = null;
-      SES.origemRespostas       = {};
-    }
     _navLock = false;
     if (_pendingScreen && _pendingScreen !== currentScreen) {
       const p = _pendingScreen;
@@ -2336,7 +2339,11 @@ function saveOSDraft(reason) {
     };
   });
 
-  const temEquipEmEdicao = SES.currentEquipId && SES.equipEdit === null && SES.dados && Object.keys(SES.dados).length > 1;
+  // v2.10: só persiste rascunho em edição quando o usuário está ativamente preenchendo
+  // formulário (t4/t4b/t5/t6). Em t3, t-export e demais, currentEquipId deve estar null
+  // (garantido pelo reset no goTo), mas esta guarda adicional protege contra edge cases.
+  const _telaFormulario = ['t4','t4b','t5','t6'].includes(currentScreen);
+  const temEquipEmEdicao = _telaFormulario && SES.currentEquipId && SES.equipEdit === null && SES.dados && Object.keys(SES.dados).length > 1;
 
   if (temEquipEmEdicao) {
     const jaIncluso = equipSerializados.some(e => e.id_equipamento_colect === SES.currentEquipId);
