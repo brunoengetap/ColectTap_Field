@@ -347,9 +347,22 @@ input[type=file]{display:none}
       <div class="hdr-title">Ordens de Serviço</div>
       <div class="hdr-sub" id="t2-inspector">Inspetor</div>
     </div>
+    <button onclick="runDiagnostico()" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:14px;cursor:pointer;color:var(--text2)" title="Diagnóstico">🔍</button>
     <button onclick="atualizarOS()" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:14px;cursor:pointer;color:var(--text2)" title="Atualizar">🔄</button>
   </div>
   <div class="body" id="t2-body"><div class="empty-state"><div class="ei">📋</div>Carregando…</div></div>
+</div>
+
+<!-- MODAL DIAGNÓSTICO -->
+<div id="diag-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;padding:16px;overflow-y:auto">
+  <div style="background:var(--surf);border-radius:16px;padding:20px;max-width:500px;margin:0 auto;font-size:13px;color:var(--text)">
+    <h3 style="margin:0 0 12px;color:var(--accent)">🔍 Diagnóstico ColectTap</h3>
+    <pre id="diag-output" style="white-space:pre-wrap;word-break:break-all;background:var(--bg);padding:12px;border-radius:8px;max-height:60vh;overflow-y:auto;font-size:11px;line-height:1.5"></pre>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button onclick="runDedup()" style="flex:1;padding:10px;border-radius:8px;background:#dc2626;color:#fff;border:none;font-weight:700;font-size:13px;cursor:pointer">🗑️ Limpar duplicatas</button>
+      <button onclick="document.getElementById('diag-overlay').style.display='none'" style="flex:1;padding:10px;border-radius:8px;background:var(--surf2);color:var(--text);border:1px solid var(--border);font-weight:700;font-size:13px;cursor:pointer">Fechar</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ -->
@@ -3833,6 +3846,94 @@ window.addEventListener('load', () => {
     });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════
+// DIAGNÓSTICO + DEDUP (v2.10)
+// ═══════════════════════════════════════════════════════════════
+function runDiagnostico() {
+  const out = [];
+  out.push('APP_VERSION: ' + APP_VERSION);
+  out.push('');
+  const keys = Object.keys(localStorage).filter(k => k.startsWith('colect_os_'));
+  out.push(keys.length + ' OS no localStorage');
+  out.push('');
+  let totalDupes = 0;
+  keys.forEach(k => {
+    const osId = k.replace('colect_os_', '');
+    const raw = localStorage.getItem(k);
+    const d = JSON.parse(raw);
+    const eqs = (d && d.equipamentos) || [];
+    out.push('OS ' + osId + ': ' + eqs.length + ' equips (' + (raw.length/1024).toFixed(0) + 'KB)');
+    const seen = {}; let dupes = 0; const tagCount = {};
+    eqs.forEach((eq, i) => {
+      const id = eq.id_equipamento_colect;
+      if (seen[id]) { dupes++; out.push('  DUP #' + i + ' id=' + (id||'').substring(0,20) + '.. tag=' + ((eq.dados&&eq.dados.tag)||'?') + ' sync=' + eq.sync_status); }
+      else seen[id] = true;
+      const t = (eq.dados && eq.dados.tag) || eq.tag || '?';
+      tagCount[t] = (tagCount[t]||0) + 1;
+    });
+    const dupTags = Object.entries(tagCount).filter(e => e[1] > 1);
+    if (dupTags.length) out.push('  TAGs repetidas: ' + dupTags.map(e => e[0]+' ('+e[1]+'x)').join(', '));
+    const st = {};
+    eqs.forEach(e => { const s = e.sync_status||'?'; st[s]=(st[s]||0)+1; });
+    out.push('  Status: ' + JSON.stringify(st));
+    if (dupes > 0) { totalDupes += dupes; out.push('  ' + dupes + ' duplicata(s)!'); }
+    else out.push('  OK sem duplicatas');
+    out.push('');
+  });
+  const legKeys = Object.keys(localStorage).filter(k => k.startsWith('colect_equip_'));
+  if (legKeys.length) {
+    out.push('CHAVES LEGADO:');
+    legKeys.forEach(k => { try { const a=JSON.parse(localStorage.getItem(k)); out.push('  '+k+': '+(Array.isArray(a)?a.length:0)+' itens'); } catch(e){} });
+    out.push('');
+  }
+  out.push('MEMORIA:');
+  out.push('  equipamentos: ' + (SES.equipamentos||[]).length);
+  out.push('  currentEquipId: ' + SES.currentEquipId);
+  out.push('  equipEdit: ' + SES.equipEdit);
+  out.push('  tela: ' + currentScreen);
+  out.push('');
+  if (totalDupes > 0) out.push('TOTAL: ' + totalDupes + ' duplicata(s). Toque LIMPAR para corrigir.');
+  else out.push('Nenhuma duplicata. Se o contador cresce, screenshot ANTES e DEPOIS de envio.');
+  document.getElementById('diag-output').textContent = out.join('\n');
+  document.getElementById('diag-overlay').style.display = 'block';
+}
+
+function runDedup() {
+  const out = []; let total = 0;
+  Object.keys(localStorage).filter(k => k.startsWith('colect_os_')).forEach(k => {
+    const d = JSON.parse(localStorage.getItem(k));
+    const eqs = d.equipamentos || [];
+    const seen = {}; const uniq = [];
+    eqs.forEach(eq => {
+      const id = eq.id_equipamento_colect;
+      if (seen[id]) {
+        const ei = uniq.findIndex(e => e.id_equipamento_colect === id);
+        if (ei >= 0) { const p={'liberado_relatorio':3,'synced':2,'salvo':1,'local':0,'rascunho':-1}; if ((p[eq.sync_status]||0)>(p[uniq[ei].sync_status]||0)) uniq[ei]=eq; }
+      } else { seen[id]=true; uniq.push(eq); }
+    });
+    if (uniq.length < eqs.length) {
+      total += eqs.length - uniq.length;
+      d.equipamentos = uniq;
+      localStorage.setItem(k, JSON.stringify(d));
+      out.push(k.replace('colect_os_','') + ': ' + eqs.length + ' -> ' + uniq.length);
+    }
+  });
+  Object.keys(localStorage).filter(k => k.startsWith('colect_equip_')).forEach(k => { localStorage.removeItem(k); out.push('Legado removido: '+k); });
+  if (total > 0) { out.push(''); out.push(total + ' duplicata(s) removida(s). Recarregue a pagina.'); }
+  else out.push('Nenhuma duplicata para remover.');
+  document.getElementById('diag-output').textContent = out.join('\n');
+  if (SES.os && SES.os.id_os) {
+    const draft = loadDraftsForOS(SES.os.id_os);
+    if (draft && Array.isArray(draft.equipamentos)) {
+      SES.equipamentos = draft.equipamentos.map(e => {
+        const sc=e.status_completude||'rascunho'; const ss=e.sync_status||'local';
+        return {...(e.dados||{}), id_equipamento_colect:e.id_equipamento_colect, tipo:e.tipo||'', _fotos:e.fotos||{}, _pendencias:e.pendencias||[], _salvo:sc!=='rascunho', _nao_enquadrado:sc==='nao_enquadrado', status_completude:sc, sync_status:ss, synced_at:e.synced_at||null, drive_folder_url:e.drive_folder_url||null, drive_folder_id:e.drive_folder_id||null, created_at:e.created_at||null};
+      });
+    }
+    renderT2();
+  }
+}
 </script>
 </body>
 </html>
